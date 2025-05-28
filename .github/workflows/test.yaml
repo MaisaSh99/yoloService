@@ -8,8 +8,10 @@ on:
 jobs:
   run-tests:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -21,7 +23,16 @@ jobs:
           pip install -r requirements.txt
           pip install -r torch-requirements.txt
           pip install pytest
+          pip install opencv-python numpy
 
-      - name: Run unit tests
+      - name: Prepare test image and folders
         run: |
-          pytest tests/test_app.py
+          mkdir -p uploads/original uploads/predicted tests
+          if [ ! -f tests/test_image.jpg ]; then
+            echo "Creating a placeholder test image"
+            python -c "import cv2, numpy as np; cv2.imwrite('tests/test_image.jpg', np.zeros((100, 100, 3), dtype=np.uint8))"
+          fi
+
+      - name: Run API endpoint tests
+        run: |
+          pytest tests/test_app.py --disable-warnings -v
