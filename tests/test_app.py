@@ -5,6 +5,7 @@ import glob
 from fastapi.testclient import TestClient
 import time
 
+# Add project root to sys.path to import app
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from app import app
 
@@ -15,7 +16,8 @@ predicted_dir = "uploads/predicted"
 test_image_src = "tests/test_image.jpg"
 test_image_dst = os.path.join(original_dir, "test_image.jpg")
 
-prediction_uid = None  # GLOBAL for all tests
+# Global variable to share prediction ID between tests
+prediction_uid = None
 
 def setup_module(module):
     os.makedirs(original_dir, exist_ok=True)
@@ -34,23 +36,28 @@ def test_predict_with_real_image():
     assert "prediction_uid" in result
     prediction_uid = result["prediction_uid"]
     assert prediction_uid
-    time.sleep(1)
+    time.sleep(1)  # Allow file writes to settle
 
 def test_get_prediction_by_uid():
     global prediction_uid
     response = client.get(f"/prediction/{prediction_uid}")
     assert response.status_code == 200
-    assert "labels" in response.json()
+    json_data = response.json()
+    assert "detection_objects" in json_data
+    assert isinstance(json_data["detection_objects"], list)
 
 def test_get_prediction_image():
     global prediction_uid
-    response = client.get(f"/prediction/{prediction_uid}/image")
+    response = client.get(
+        f"/prediction/{prediction_uid}/image",
+        headers={"Accept": "image/jpeg"}
+    )
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/")
 
 def test_get_predictions_by_label():
     response = client.get("/predictions/label/person")
-    assert response.status_code in [200, 404]
+    assert response.status_code in [200, 404]  # 404 if label wasn't found
 
 def test_get_predictions_by_score():
     response = client.get("/predictions/score/0.2")
@@ -62,9 +69,7 @@ def test_get_original_image():
 
 def test_get_predicted_image():
     pred_images = glob.glob(os.path.join(predicted_dir, "*.jpg"))
-    if pred_images:
-        filename = os.path.basename(pred_images[0])
-        response = client.get(f"/image/predicted/{filename}")
-        assert response.status_code == 200
-    else:
-        assert False, "No predicted image found to test /image/predicted"
+    assert pred_images, "No predicted image found to test /image/predicted"
+    filename = os.path.basename(pred_images[0])
+    response = client.get(f"/image/predicted/{filename}")
+    assert response.status_code == 200
