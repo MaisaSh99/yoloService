@@ -1,4 +1,4 @@
-name: Deploy YoloService
+name: Yolo Deploy
 
 on:
   push:
