@@ -20,12 +20,12 @@ jobs:
 
       - name: Configure SSH for Testing
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/private_key
+          echo "$EC2_SSH_KEY" > ~/.ssh/private_key
           chmod 600 ~/.ssh/private_key
           echo "Host ec2
             HostName ${EC2_HOST}
@@ -33,15 +33,19 @@ jobs:
             IdentityFile ~/.ssh/private_key
             StrictHostKeyChecking no" > ~/.ssh/config
 
-      - name: Clean Untracked Files and Setup Environment on EC2
+      - name: Setup and Prepare EC2 for Testing
         run: |
-          ssh ec2 '
-            if [ -d "$REPO_NAME" ]; then
-              cd "$REPO_NAME" && git fetch origin && git reset --hard origin/main
+          ssh ec2 "
+            set -e
+            if [ -d '${{ env.REPO_NAME }}' ]; then
+              cd '${{ env.REPO_NAME }}' && git fetch origin && git reset --hard origin/main
             else
-              git clone "$REPO_URL"
-              cd "$REPO_NAME"
+              git clone '${{ env.REPO_URL }}'
+              cd '${{ env.REPO_NAME }}'
             fi
+
+            sudo apt update
+            sudo apt install -y python3 python3-pip python3-venv libgl1
 
             python3 -m venv .venv
             source .venv/bin/activate
@@ -53,16 +57,13 @@ jobs:
             pip install opencv-python numpy
 
             mkdir -p uploads/original uploads/predicted tests
-            if [ ! -f tests/test_image.jpg ]; then
-              echo "Creating a placeholder test image"
-              python -c "import cv2, numpy as np; cv2.imwrite('tests/test_image.jpg', np.zeros((100, 100, 3), dtype=np.uint8))"
-            fi
-          '
+            python -c \"import cv2, numpy as np; cv2.imwrite('tests/test_image.jpg', np.zeros((100, 100, 3), dtype=np.uint8))\"
+          "
 
       - name: Run Tests on EC2
         run: |
           ssh ec2 "
-            cd $REPO_NAME
+            cd '${{ env.REPO_NAME }}'
             source .venv/bin/activate
             pytest tests/test_app.py --disable-warnings -v
           "
