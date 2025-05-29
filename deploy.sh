@@ -1,48 +1,34 @@
-name: Deploy YoloService
+#!/bin/bash
+set -e
 
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+echo "Installing system packages..."
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv git libgl1
 
-env:
-  REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-  REPO_NAME: ${{ github.event.repository.name }}
+echo "Cloning repo or pulling latest changes..."
+cd ~
+REPO_NAME="yoloService"
+REPO_URL="https://github.com/MaisaSh99/yoloService.git"
+if [ -d "$REPO_NAME" ]; then
+    cd "$REPO_NAME"
+    git pull
+else
+    git clone "$REPO_URL"
+    cd "$REPO_NAME"
+fi
 
-jobs:
-  Deploy:
-    runs-on: ubuntu-latest
+echo "Setting up virtual environment..."
+python3 -m venv .venv
+source .venv/bin/activate
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+echo "Installing Python dependencies..."
+pip install --upgrade pip
+pip install -r torch-requirements.txt
+pip install -r requirements.txt
+pip install opencv-python numpy
 
-      - name: Configure SSH
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          echo "Host ec2
-            HostName ${EC2_HOST}
-            User ${EC2_USER}
-            IdentityFile ~/.ssh/id_rsa
-            StrictHostKeyChecking no" > ~/.ssh/config
-
-      - name: Clone or Pull Repo on EC2
-        run: |
-          ssh ec2 "if [ -d ~/${REPO_NAME} ]; then cd ~/${REPO_NAME} && git pull origin main; else git clone ${REPO_URL} ~/${REPO_NAME}; fi"
-
-      - name: Copy service file and deploy script to EC2
-        run: |
-          scp yolo.service ec2:~/yolo.service
-          scp deploy.sh ec2:~/deploy.sh
-          ssh ec2 "chmod +x ~/deploy.sh"
-
-      - name: Run deployment script on EC2
-        run: |
-          ssh ec2 "~/deploy.sh"
+echo "Copying and enabling YOLO service..."
+sudo cp ~/yolo.service /etc/systemd/system/yolo.service
+sudo systemctl daemon-reload
+sudo systemctl enable yolo.service
+sudo systemctl restart yolo.service

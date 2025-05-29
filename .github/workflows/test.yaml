@@ -25,13 +25,13 @@ jobs:
           EC2_USER: ${{ secrets.EC2_USER }}
         run: |
           mkdir -p ~/.ssh
-          echo "$EC2_SSH_KEY" > ~/.ssh/private_key
-          chmod 600 ~/.ssh/private_key
+          echo "$EC2_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
           echo "Host ec2
-            HostName ${EC2_HOST}
-            User ${EC2_USER}
-            IdentityFile ~/.ssh/private_key
-            StrictHostKeyChecking no" > ~/.ssh/config
+                HostName $EC2_HOST
+                User $EC2_USER
+                IdentityFile ~/.ssh/id_rsa
+                StrictHostKeyChecking no" > ~/.ssh/config
 
       - name: Setup and Prepare EC2 for Testing
         run: |
