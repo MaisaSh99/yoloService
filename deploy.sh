@@ -28,10 +28,10 @@ jobs:
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           echo "Host ec2
-                HostName $EC2_HOST
-                User $EC2_USER
-                IdentityFile ~/.ssh/id_rsa
-                StrictHostKeyChecking no" > ~/.ssh/config
+            HostName ${EC2_HOST}
+            User ${EC2_USER}
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no" > ~/.ssh/config
 
       - name: Clone or Pull Repo on EC2
         run: |

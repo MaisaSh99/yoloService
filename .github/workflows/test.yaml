@@ -1,38 +1,69 @@
-name: Run API Tests
+name: Yolo Test
 
 on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+env:
+  REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+  REPO_NAME: ${{ github.event.repository.name }}
 
 jobs:
-  run-tests:
+  Test:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
+      - name: Configure SSH for Testing
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
         run: |
-          pip install -r requirements.txt
-          pip install -r torch-requirements.txt
-          pip install pytest
-          pip install opencv-python numpy
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/private_key
+          chmod 600 ~/.ssh/private_key
+          echo "Host ec2
+            HostName ${EC2_HOST}
+            User ${EC2_USER}
+            IdentityFile ~/.ssh/private_key
+            StrictHostKeyChecking no" > ~/.ssh/config
 
-      - name: Prepare test image and folders
+      - name: Setup and Prepare EC2 for Testing
         run: |
-          mkdir -p uploads/original uploads/predicted tests
-          if [ ! -f tests/test_image.jpg ]; then
-            echo "Creating a placeholder test image"
-            python -c "import cv2, numpy as np; cv2.imwrite('tests/test_image.jpg', np.zeros((100, 100, 3), dtype=np.uint8))"
-          fi
+          ssh ec2 "
+            set -e
+            if [ -d '${{ env.REPO_NAME }}' ]; then
+              cd '${{ env.REPO_NAME }}' && git fetch origin && git reset --hard origin/main
+            else
+              git clone '${{ env.REPO_URL }}'
+              cd '${{ env.REPO_NAME }}'
+            fi
 
-      - name: Run API endpoint tests
+            sudo apt update
+            sudo apt install -y python3 python3-pip python3-venv libgl1
+
+            python3 -m venv .venv
+            source .venv/bin/activate
+
+            pip install --upgrade pip
+            pip install -r torch-requirements.txt
+            pip install -r requirements.txt
+            pip install pytest
+            pip install opencv-python numpy
+
+            mkdir -p uploads/original uploads/predicted tests
+            python -c \"import cv2, numpy as np; cv2.imwrite('tests/test_image.jpg', np.zeros((100, 100, 3), dtype=np.uint8))\"
+          "
+
+      - name: Run Tests on EC2
         run: |
-          pytest tests/test_app.py --disable-warnings -v
+          ssh ec2 "
+            cd '${{ env.REPO_NAME }}'
+            source .venv/bin/activate
+            pytest tests/test_app.py --disable-warnings -v
+          "

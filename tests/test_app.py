@@ -4,6 +4,7 @@ import shutil
 import glob
 from fastapi.testclient import TestClient
 import time
+import json
 
 # Add project root to sys.path to import app
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -36,10 +37,11 @@ def test_predict_with_real_image():
     assert "prediction_uid" in result
     prediction_uid = result["prediction_uid"]
     assert prediction_uid
-    time.sleep(1)  # Allow file writes to settle
+    time.sleep(1)
 
 def test_get_prediction_by_uid():
     global prediction_uid
+    assert prediction_uid is not None
     response = client.get(f"/prediction/{prediction_uid}")
     assert response.status_code == 200
     json_data = response.json()
@@ -57,11 +59,16 @@ def test_get_prediction_image():
 
 def test_get_predictions_by_label():
     response = client.get("/predictions/label/person")
-    assert response.status_code in [200, 404]  # 404 if label wasn't found
+    assert response.status_code in [200, 404]
 
-def test_get_predictions_by_score():
+def test_get_predictions_by_score_valid():
     response = client.get("/predictions/score/0.2")
     assert response.status_code == 200
+
+def test_get_predictions_by_score_invalid():
+    response = client.get("/predictions/score/1.5")
+    assert response.status_code == 400
+    assert "Score must be between 0 and 1" in response.text
 
 def test_get_original_image():
     response = client.get(f"/image/original/test_image.jpg")
@@ -73,3 +80,42 @@ def test_get_predicted_image():
     filename = os.path.basename(pred_images[0])
     response = client.get(f"/image/predicted/{filename}")
     assert response.status_code == 200
+
+def test_prediction_not_found():
+    response = client.get("/prediction/invalid_uid")
+    assert response.status_code == 404
+    assert "Prediction not found" in response.text
+
+def test_prediction_image_not_found():
+    response = client.get("/prediction/invalid_uid/image", headers={"Accept": "image/jpeg"})
+    assert response.status_code == 404
+    assert "Prediction not found" in response.text
+
+def test_prediction_image_not_acceptable_format():
+    global prediction_uid
+    response = client.get(
+        f"/prediction/{prediction_uid}/image",
+        headers={"Accept": "application/json"}
+    )
+    assert response.status_code == 406
+    assert "Client does not accept an image format" in response.text
+
+def test_invalid_image_type_endpoint():
+    response = client.get("/image/invalid_type/test.jpg")
+    assert response.status_code == 400
+    assert "Invalid image type" in response.text
+
+def test_original_image_not_found():
+    response = client.get("/image/original/nonexistent.jpg")
+    assert response.status_code == 404
+    assert "Image not found" in response.text
+
+def test_predicted_image_not_found():
+    response = client.get("/image/predicted/nonexistent.jpg")
+    assert response.status_code == 404
+    assert "Image not found" in response.text
+
+def test_health_check():
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json().get("status") == "ok"
