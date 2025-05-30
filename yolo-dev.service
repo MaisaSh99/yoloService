@@ -5,10 +5,10 @@ After=network.target
 [Service]
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=/home/ubuntu/yoloServiceNEW
-Environment="PATH=/home/ubuntu/yoloServiceNEW/venv/bin"
+WorkingDirectory=/home/ubuntu/yoloService
+Environment="PATH=/home/ubuntu/yoloService/venv/bin"
 Environment="S3_BUCKET_NAME=maisa-dev-bucket"
-ExecStart=/home/ubuntu/yoloServiceNEW/venv/bin/uvicorn app:app --host 0.0.0.0 --port 8080 --workers 4
+ExecStart=/home/ubuntu/yoloService/venv/bin/uvicorn app:app --host 0.0.0.0 --port 8080 --workers 4
 Restart=always
 RestartSec=5
 StandardOutput=journal
