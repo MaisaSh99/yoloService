@@ -87,7 +87,7 @@ def predict(user_id: str = Form(...), timestamp: str = Form(...)):
 
     try:
         s3 = boto3.client('s3')
-        bucket_name = 'maisa-polybot-images'
+        bucket_name = os.environ.get("S3_BUCKET_NAME", "maisa-polybot-images")
         ext = ".jpg"
         uid = str(uuid.uuid4())
 
