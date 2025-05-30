@@ -1,3 +1,4 @@
+this is my deploy.sh:
 #!/bin/bash
 set -e
 

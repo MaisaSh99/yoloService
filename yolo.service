@@ -7,7 +7,7 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/yoloServiceNEW
 Environment="PATH=/home/ubuntu/yoloServiceNEW/venv/bin"
-Environment="S3_BUCKET_NAME=merry-polybot-images"
+Environment="S3_BUCKET_NAME=maisa-polybot-images"
 ExecStart=/home/ubuntu/yoloServiceNEW/venv/bin/uvicorn app:app --host 0.0.0.0 --port 8080 --workers 4
 Restart=always
 RestartSec=5
@@ -16,5 +16,3 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-
-
