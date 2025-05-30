@@ -1,18 +1,15 @@
-# app.py
-
 import boto3
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Form
+from fastapi import FastAPI, HTTPException, Request, Form
 from fastapi.responses import FileResponse
 from ultralytics import YOLO
 from PIL import Image
 import sqlite3
 import os
 import uuid
-import shutil
 import traceback
-import torch
 
 # Disable GPU usage
+import torch
 torch.cuda.is_available = lambda: False
 
 app = FastAPI()
@@ -24,12 +21,13 @@ DB_PATH = "predictions.db"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PREDICTED_DIR, exist_ok=True)
 
-# Load YOLO model
+# Download the AI model (tiny model ~6MB)
 model = YOLO("yolov8n.pt")
 
-# Initialize SQLite database
+
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
+        # Create the predictions main table to store the prediction session
         conn.execute("""
             CREATE TABLE IF NOT EXISTS prediction_sessions (
                 uid TEXT PRIMARY KEY,
@@ -38,6 +36,7 @@ def init_db():
                 predicted_image TEXT
             )
         """)
+        # Create the objects table to store individual detected objects in a given image
         conn.execute("""
             CREATE TABLE IF NOT EXISTS detection_objects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,33 +47,47 @@ def init_db():
                 FOREIGN KEY (prediction_uid) REFERENCES prediction_sessions (uid)
             )
         """)
+        # Create index for faster queries
         conn.execute("CREATE INDEX IF NOT EXISTS idx_prediction_uid ON detection_objects (prediction_uid)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_label ON detection_objects (label)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_score ON detection_objects (score)")
 
+
 init_db()
 
+
 def save_prediction_session(uid, original_image, predicted_image):
+    """
+    Save prediction session to database
+    """
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             INSERT INTO prediction_sessions (uid, original_image, predicted_image)
             VALUES (?, ?, ?)
         """, (uid, original_image, predicted_image))
 
+
 def save_detection_object(prediction_uid, label, score, box):
+    """
+    Save detection object to database
+    """
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             INSERT INTO detection_objects (prediction_uid, label, score, box)
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
 
+
 @app.post("/predict")
 def predict(user_id: str = Form(...), timestamp: str = Form(...)):
+    """
+    Predict objects in an image
+    """
     print(f"[YOLO] Incoming /predict with user_id={user_id}, timestamp={timestamp}")
 
     try:
         s3 = boto3.client('s3')
-        bucket_name = os.getenv("S3_BUCKET_NAME", "maisa-polybot-images")
+        bucket_name = 'maisa-polybot-images'
         ext = ".jpg"
         uid = str(uuid.uuid4())
 
@@ -117,14 +130,20 @@ def predict(user_id: str = Form(...), timestamp: str = Form(...)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
 
+
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
+    """
+    Get prediction session by uid with all detected objects
+    """
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
+        # Get prediction session
         session = conn.execute("SELECT * FROM prediction_sessions WHERE uid = ?", (uid,)).fetchone()
         if not session:
             raise HTTPException(status_code=404, detail="Prediction not found")
 
+        # Get all detection objects for this prediction
         objects = conn.execute(
             "SELECT * FROM detection_objects WHERE prediction_uid = ?",
             (uid,)
@@ -145,8 +164,12 @@ def get_prediction_by_uid(uid: str):
             ]
         }
 
+
 @app.get("/predictions/label/{label}")
 def get_predictions_by_label(label: str):
+    """
+    Get prediction sessions containing objects with specified label
+    """
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("""
@@ -156,16 +179,14 @@ def get_predictions_by_label(label: str):
             WHERE do.label = ?
         """, (label,)).fetchall()
 
-        if not rows:
-            raise HTTPException(status_code=404, detail="Label not found")
-
         return [{"uid": row["uid"], "timestamp": row["timestamp"]} for row in rows]
+
 
 @app.get("/predictions/score/{min_score}")
 def get_predictions_by_score(min_score: float):
-    if not (0.0 <= min_score <= 1.0):
-        raise HTTPException(status_code=400, detail="Score must be between 0 and 1")
-
+    """
+    Get prediction sessions containing objects with score >= min_score
+    """
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("""
@@ -177,8 +198,12 @@ def get_predictions_by_score(min_score: float):
 
         return [{"uid": row["uid"], "timestamp": row["timestamp"]} for row in rows]
 
+
 @app.get("/image/{type}/{filename}")
 def get_image(type: str, filename: str):
+    """
+    Get image by type and filename
+    """
     if type not in ["original", "predicted"]:
         raise HTTPException(status_code=400, detail="Invalid image type")
     path = os.path.join("uploads", type, filename)
@@ -186,8 +211,12 @@ def get_image(type: str, filename: str):
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(path)
 
+
 @app.get("/prediction/{uid}/image")
 def get_prediction_image(uid: str, request: Request):
+    """
+    Get prediction image by uid
+    """
     accept = request.headers.get("accept", "")
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute("SELECT predicted_image FROM prediction_sessions WHERE uid = ?", (uid,)).fetchone()
@@ -203,12 +232,19 @@ def get_prediction_image(uid: str, request: Request):
     elif "image/jpeg" in accept or "image/jpg" in accept:
         return FileResponse(image_path, media_type="image/jpeg")
     else:
+        # If the client doesn't accept image, respond with 406 Not Acceptable
         raise HTTPException(status_code=406, detail="Client does not accept an image format")
+
 
 @app.get("/health")
 def health():
+    """
+    Health check endpoint
+    """
     return {"status": "ok"}
+
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8080)
