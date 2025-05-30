@@ -33,12 +33,42 @@ jobs:
                 IdentityFile ~/.ssh/id_rsa
                 StrictHostKeyChecking no" > ~/.ssh/config
 
-      - name: Copy service file and deploy script to EC2 (Dev)
+      - name: Upload files to EC2 (Dev)
         run: |
           scp yolo-dev.service ec2-dev:~/yolo-dev.service
-          scp deploy-dev.sh ec2-dev:~/deploy.sh
-          ssh ec2-dev "chmod +x ~/deploy.sh"
 
-      - name: Run deployment script on EC2 (Dev)
+      - name: SSH Deploy Script (Dev)
         run: |
-          ssh ec2-dev "~/deploy.sh"
+          ssh ec2-dev << 'EOF'
+            echo "✅ Installing dependencies..."
+            sudo apt update
+            sudo apt install -y git python3 python3-pip python3-venv
+
+            echo "📁 Setting up repo..."
+            cd /home/ubuntu
+            if [ -d "yoloService" ]; then
+              cd yoloService
+              git pull origin dev
+            else
+              git clone ${REPO_URL} yoloService
+              cd yoloService
+              git checkout dev
+            fi
+
+            echo "📦 Setting up Python environment..."
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            pip install boto3
+
+            echo "⚙️ Updating systemd service..."
+            sudo mv ~/yolo-dev.service /etc/systemd/system/yolo-dev.service
+            sudo systemctl daemon-reload
+            sudo systemctl restart yolo-dev.service
+            sudo systemctl enable yolo-dev.service
+
+            echo "✅ YOLO dev deployed!"
+          EOF

@@ -1,4 +1,7 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+# app.py
+
+import boto3
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Form
 from fastapi.responses import FileResponse
 from ultralytics import YOLO
 from PIL import Image
@@ -6,6 +9,7 @@ import sqlite3
 import os
 import uuid
 import shutil
+import traceback
 import torch
 
 # Disable GPU usage
@@ -65,37 +69,53 @@ def save_detection_object(prediction_uid, label, score, box):
         """, (prediction_uid, label, score, str(box)))
 
 @app.post("/predict")
-def predict(file: UploadFile = File(...)):
-    ext = os.path.splitext(file.filename)[1]
-    uid = str(uuid.uuid4())
-    original_path = os.path.join(UPLOAD_DIR, uid + ext)
-    predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
+def predict(user_id: str = Form(...), timestamp: str = Form(...)):
+    print(f"[YOLO] Incoming /predict with user_id={user_id}, timestamp={timestamp}")
 
-    with open(original_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    try:
+        s3 = boto3.client('s3')
+        bucket_name = os.getenv("S3_BUCKET_NAME", "maisa-polybot-images")
+        ext = ".jpg"
+        uid = str(uuid.uuid4())
 
-    results = model(original_path, device="cpu")
+        original_s3_key = f"original/{user_id}/{timestamp}{ext}"
+        predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted{ext}"
 
-    annotated_frame = results[0].plot()
-    annotated_image = Image.fromarray(annotated_frame)
-    annotated_image.save(predicted_path)
+        original_path = os.path.join(UPLOAD_DIR, uid + ext)
+        predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
 
-    save_prediction_session(uid, original_path, predicted_path)
+        print(f"[YOLO] Downloading from S3: s3://{bucket_name}/{original_s3_key}")
+        s3.download_file(bucket_name, original_s3_key, original_path)
 
-    detected_labels = []
-    for box in results[0].boxes:
-        label_idx = int(box.cls[0].item())
-        label = model.names[label_idx]
-        score = float(box.conf[0])
-        bbox = box.xyxy[0].tolist()
-        save_detection_object(uid, label, score, bbox)
-        detected_labels.append(label)
+        results = model(original_path, device="cpu")
+        annotated_frame = results[0].plot()
+        annotated_image = Image.fromarray(annotated_frame)
+        annotated_image.save(predicted_path)
 
-    return {
-        "prediction_uid": uid,
-        "detection_count": len(results[0].boxes),
-        "labels": detected_labels
-    }
+        save_prediction_session(uid, original_path, predicted_path)
+
+        detected_labels = []
+        for box in results[0].boxes:
+            label_idx = int(box.cls[0].item())
+            label = model.names[label_idx]
+            score = float(box.conf[0])
+            bbox = box.xyxy[0].tolist()
+            save_detection_object(uid, label, score, bbox)
+            detected_labels.append(label)
+
+        print(f"[YOLO] Uploading predicted image to s3://{bucket_name}/{predicted_s3_key}")
+        s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
+
+        return {
+            "prediction_uid": uid,
+            "detection_count": len(detected_labels),
+            "labels": detected_labels
+        }
+
+    except Exception as e:
+        print("[YOLO ERROR]", str(e))
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
 
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
