@@ -11,9 +11,9 @@ REPO_NAME="yoloService"
 REPO_URL="https://github.com/MaisaSh99/yoloService.git"
 if [ -d "$REPO_NAME" ]; then
     cd "$REPO_NAME"
-    git pull
+    git pull origin dev
 else
-    git clone "$REPO_URL"
+    git clone -b dev "$REPO_URL"
     cd "$REPO_NAME"
 fi
 

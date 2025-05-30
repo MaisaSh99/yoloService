@@ -33,13 +33,9 @@ jobs:
                 IdentityFile ~/.ssh/id_rsa
                 StrictHostKeyChecking no" > ~/.ssh/config
 
-      - name: Clone or Pull Repo on EC2 (Dev)
-        run: |
-          ssh ec2-dev "if [ -d ~/${REPO_NAME} ]; then cd ~/${REPO_NAME} && git pull origin dev; else git clone -b dev ${REPO_URL} ~/${REPO_NAME}; fi"
-
       - name: Copy service file and deploy script to EC2 (Dev)
         run: |
-          scp yolo-dev.service ec2-dev:~/yolo.service
+          scp yolo-dev.service ec2-dev:~/yolo-dev.service
           scp deploy-dev.sh ec2-dev:~/deploy.sh
           ssh ec2-dev "chmod +x ~/deploy.sh"
 
