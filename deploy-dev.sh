@@ -1,4 +1,3 @@
-this is my deploy.sh:
 #!/bin/bash
 set -e
 
@@ -12,9 +11,9 @@ REPO_NAME="yoloService"
 REPO_URL="https://github.com/MaisaSh99/yoloService.git"
 if [ -d "$REPO_NAME" ]; then
     cd "$REPO_NAME"
-    git pull
+    git pull origin dev
 else
-    git clone "$REPO_URL"
+    git clone -b dev "$REPO_URL"
     cd "$REPO_NAME"
 fi
 
@@ -28,8 +27,10 @@ pip install -r torch-requirements.txt
 pip install -r requirements.txt
 pip install opencv-python numpy
 
-echo "Copying and enabling YOLO service..."
-sudo cp ~/yolo.service /etc/systemd/system/yolo.service
+echo "Copying and enabling YOLO dev service..."
+sudo cp ~/yolo-dev.service /etc/systemd/system/yolo.service
 sudo systemctl daemon-reload
 sudo systemctl enable yolo.service
 sudo systemctl restart yolo.service
+
+echo "✅ YOLO development service deployed and running!"

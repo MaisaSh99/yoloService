@@ -1,0 +1,44 @@
+name: Yolo Deploy (Dev)
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+env:
+  REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+  REPO_NAME: ${{ github.event.repository.name }}
+
+jobs:
+  Deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure SSH (Dev)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_DEV_HOST: ${{ secrets.EC2_DEV_HOST }}
+          EC2_DEV_USER: ${{ secrets.EC2_DEV_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "Host ec2-dev
+                HostName $EC2_DEV_HOST
+                User $EC2_DEV_USER
+                IdentityFile ~/.ssh/id_rsa
+                StrictHostKeyChecking no" > ~/.ssh/config
+
+      - name: Copy service file and deploy script to EC2 (Dev)
+        run: |
+          scp yolo-dev.service ec2-dev:~/yolo-dev.service
+          scp deploy-dev.sh ec2-dev:~/deploy.sh
+          ssh ec2-dev "chmod +x ~/deploy.sh"
+
+      - name: Run deployment script on EC2 (Dev)
+        run: |
+          ssh ec2-dev "~/deploy.sh"
