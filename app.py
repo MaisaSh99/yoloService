@@ -1,5 +1,5 @@
 import boto3
-from fastapi import FastAPI, HTTPException, Request, Form
+from fastapi import FastAPI, HTTPException, Request, Form, UploadFile, File
 from fastapi.responses import FileResponse
 from ultralytics import YOLO
 from PIL import Image
@@ -67,23 +67,30 @@ def save_detection_object(prediction_uid, label, score, box):
         """, (prediction_uid, label, score, str(box)))
 
 @app.post("/predict")
-def predict(user_id: str = Form(...), timestamp: str = Form(...)):
-    print(f"[YOLO] Incoming /predict with user_id={user_id}, timestamp={timestamp}")
+def predict(file: UploadFile = File(...)):
+    print(f"[YOLO] Incoming /predict with file: {file.filename}")
 
     try:
         s3 = boto3.client('s3')
-        ext = ".jpg"
+        ext = os.path.splitext(file.filename)[1] or ".jpg"
         uid = str(uuid.uuid4())
 
-        original_s3_key = f"original/{user_id}/{timestamp}{ext}"
-        predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted{ext}"
+        original_filename = f"{uid}{ext}"
+        predicted_filename = f"{uid}_predicted{ext}"
+        original_path = os.path.join(UPLOAD_DIR, original_filename)
+        predicted_path = os.path.join(PREDICTED_DIR, predicted_filename)
 
-        original_path = os.path.join(UPLOAD_DIR, uid + ext)
-        predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
+        # Save uploaded file locally
+        with open(original_path, "wb") as f:
+            f.write(file.file.read())
 
-        print(f"[YOLO] Downloading from S3: s3://{bucket_name}/{original_s3_key}")
-        s3.download_file(bucket_name, original_s3_key, original_path)
+        # Upload original image to S3
+        original_s3_key = f"original/{original_filename}"
+        predicted_s3_key = f"predicted/{predicted_filename}"
+        print(f"[YOLO] Uploading original image to s3://{bucket_name}/{original_s3_key}")
+        s3.upload_file(original_path, bucket_name, original_s3_key)
 
+        # Run YOLO detection
         results = model(original_path, device="cpu")
         annotated_frame = results[0].plot()
         annotated_image = Image.fromarray(annotated_frame)
