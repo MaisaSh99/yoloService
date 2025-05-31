@@ -4,8 +4,6 @@ import sqlite3
 import traceback
 from datetime import datetime
 import logging
-import hashlib
-from typing import Set
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
@@ -32,16 +30,6 @@ os.makedirs(PREDICTED_DIR, exist_ok=True)
 model = YOLO("yolov8n.pt")
 predictions = {}
 
-# Store processed request hashes to prevent duplicates
-processed_requests: Set[str] = set()
-
-
-def get_request_hash(request: Request, file_content: bytes) -> str:
-    """Generate a unique hash for the request to prevent duplicates."""
-    content_hash = hashlib.md5(file_content).hexdigest()
-    return f"{request.client.host}:{content_hash}"
-
-
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
@@ -66,9 +54,7 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_label ON detection_objects (label)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_score ON detection_objects (score)")
 
-
 init_db()
-
 
 def save_prediction_session(uid, original_image, predicted_image):
     with sqlite3.connect(DB_PATH) as conn:
@@ -77,7 +63,6 @@ def save_prediction_session(uid, original_image, predicted_image):
             VALUES (?, ?, ?)
         """, (uid, original_image, predicted_image))
 
-
 def save_detection_object(prediction_uid, label, score, box):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
@@ -85,38 +70,13 @@ def save_detection_object(prediction_uid, label, score, box):
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
 
-
 @app.post("/predict")
 async def predict(request: Request, file: UploadFile = File(...)):
     try:
-        # Read file content first
-        file_content = await file.read()
-
-        # Generate request hash
-        request_hash = get_request_hash(request, file_content)
-
-        # Check if this request was already processed
-        if request_hash in processed_requests:
-            logger.info(f"🔄 Duplicate request detected: {request_hash}")
-            return JSONResponse(content={"message": "Request already processed"}, status_code=200)
-
-        # Add to processed requests
-        processed_requests.add(request_hash)
-
-        # ✅ Robust extraction of header (case-insensitive)
-        all_headers = dict(request.headers)
-        print("📦 All headers:", all_headers)
-        print("📦 Header keys:", list(all_headers.keys()))
-
-        # Try different header variations
-        user_id = (
-                request.headers.get("X-User-ID") or
-                request.headers.get("x-user-id") or
-                request.headers.get("X-USER-ID") or
-                "unknown"
-        )
+        # ✅ Robust extraction of header (lowercase)
+        print("📦 All headers:", dict(request.headers))
+        user_id = request.headers.get("x-user-id") or "unknown"
         print(f"📬 Received X-User-ID: {user_id}")
-        print(f"📬 Raw header value: {request.headers.get('X-User-ID')}")
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
@@ -128,62 +88,139 @@ async def predict(request: Request, file: UploadFile = File(...)):
         # Save original image
         original_path = os.path.join(original_dir, f"{timestamp}.jpg")
         with open(original_path, "wb") as f:
-            f.write(file_content)
+            f.write(await file.read())
 
-        try:
-            # Run YOLO
-            results = model(original_path)
+        # Run YOLO
+        results = model(original_path)
 
-            # Save prediction image
-            predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
-            annotated = results[0].plot()
-            annotated_img = Image.fromarray(annotated)
-            annotated_img.save(predicted_path)
+        # Save prediction image
+        predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
+        annotated = results[0].plot()
+        annotated_img = Image.fromarray(annotated)
+        annotated_img.save(predicted_path)
 
-            # Upload to S3
-            s3 = boto3.client('s3')
-            original_s3_key = f"original/{user_id}/{timestamp}.jpg"
-            predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
+        # Upload to S3
+        s3 = boto3.client('s3')
+        original_s3_key = f"original/{user_id}/{timestamp}.jpg"
+        predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
 
-            s3.upload_file(original_path, bucket_name, original_s3_key)
-            print(f"✅ Uploaded original image to S3: {original_s3_key}")
+        s3.upload_file(original_path, bucket_name, original_s3_key)
+        print(f"✅ Uploaded original image to S3: {original_s3_key}")
 
-            s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
-            print(f"✅ Uploaded predicted image to S3: {predicted_s3_key}")
+        s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
+        print(f"✅ Uploaded predicted image to S3: {predicted_s3_key}")
 
-            # Extract labels
-            labels = []
-            for box in results[0].boxes:
-                cls_id = int(box.cls[0].item())
-                label = model.names[cls_id]
-                labels.append(label)
+        # Extract labels
+        labels = []
+        for box in results[0].boxes:
+            cls_id = int(box.cls[0].item())
+            label = model.names[cls_id]
+            labels.append(label)
 
-            # Store prediction
-            prediction_uid = str(uuid.uuid4())
-            save_prediction_session(prediction_uid, original_path, predicted_path)
-            for box in results[0].boxes:
-                cls_id = int(box.cls[0].item())
-                label = model.names[cls_id]
-                score = float(box.conf[0])
-                bbox = box.xyxy[0].tolist()
-                save_detection_object(prediction_uid, label, score, bbox)
+        # Store prediction
+        prediction_uid = str(uuid.uuid4())
+        save_prediction_session(prediction_uid, original_path, predicted_path)
+        for box in results[0].boxes:
+            cls_id = int(box.cls[0].item())
+            label = model.names[cls_id]
+            score = float(box.conf[0])
+            bbox = box.xyxy[0].tolist()
+            save_detection_object(prediction_uid, label, score, bbox)
 
-            return JSONResponse({
-                "prediction_uid": prediction_uid,
-                "detection_count": len(labels),
-                "labels": labels
-            })
-
-        except Exception as e:
-            logger.error(f"❌ YOLO processing failed: {e}")
-            logger.error(traceback.format_exc())
-            # Clean up files if they exist
-            for path in [original_path, predicted_path]:
-                if os.path.exists(path):
-                    os.remove(path)
-            return JSONResponse(content={"error": str(e)}, status_code=200)  # Return 200 to prevent retries
+        return JSONResponse({
+            "prediction_uid": prediction_uid,
+            "detection_count": len(labels),
+            "labels": labels
+        })
 
     except Exception as e:
-        logger.error(f"❌ Request processing failed: {e}")
+        logger.error(f"❌ Prediction failed: {e}")
         logger.error(traceback.format_exc())
-        return JSONResponse(content={"error": str(e)}, status_code=200)  # Return 200 to prevent retries
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/prediction/{uid}")
+def get_prediction_by_uid(uid: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        session = conn.execute("SELECT * FROM prediction_sessions WHERE uid = ?", (uid,)).fetchone()
+        if not session:
+            raise HTTPException(status_code=404, detail="Prediction not found")
+
+        objects = conn.execute("SELECT * FROM detection_objects WHERE prediction_uid = ?", (uid,)).fetchall()
+        return {
+            "uid": session["uid"],
+            "timestamp": session["timestamp"],
+            "original_image": session["original_image"],
+            "predicted_image": session["predicted_image"],
+            "detection_objects": [
+                {
+                    "id": obj["id"],
+                    "label": obj["label"],
+                    "score": obj["score"],
+                    "box": obj["box"]
+                } for obj in objects
+            ]
+        }
+
+@app.get("/predictions/label/{label}")
+def get_predictions_by_label(label: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            SELECT DISTINCT ps.uid, ps.timestamp
+            FROM prediction_sessions ps
+            JOIN detection_objects do ON ps.uid = do.prediction_uid
+            WHERE do.label = ?
+        """, (label,)).fetchall()
+
+        return [{"uid": row["uid"], "timestamp": row["timestamp"]} for row in rows]
+
+@app.get("/predictions/score/{min_score}")
+def get_predictions_by_score(min_score: float):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            SELECT DISTINCT ps.uid, ps.timestamp
+            FROM prediction_sessions ps
+            JOIN detection_objects do ON ps.uid = do.prediction_uid
+            WHERE do.score >= ?
+        """, (min_score,)).fetchall()
+
+        return [{"uid": row["uid"], "timestamp": row["timestamp"]} for row in rows]
+
+@app.get("/image/{type}/{filename}")
+def get_image(type: str, filename: str):
+    if type not in ["original", "predicted"]:
+        raise HTTPException(status_code=400, detail="Invalid image type")
+    path = os.path.join("uploads", type, filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(path)
+
+@app.get("/prediction/{uid}/image")
+def get_prediction_image(uid: str, request: Request):
+    accept = request.headers.get("accept", "")
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("SELECT predicted_image FROM prediction_sessions WHERE uid = ?", (uid,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Prediction not found")
+        image_path = row[0]
+
+    if not os.path.exists(image_path):
+        raise HTTPException(status_code=404, detail="Predicted image file not found")
+
+    if "image/png" in accept:
+        return FileResponse(image_path, media_type="image/png")
+    elif "image/jpeg" in accept or "image/jpg" in accept:
+        return FileResponse(image_path, media_type="image/jpeg")
+    else:
+        raise HTTPException(status_code=406, detail="Client does not accept an image format")
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)
