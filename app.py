@@ -9,6 +9,7 @@ import uuid
 import traceback
 import torch
 from datetime import datetime
+import logging
 
 # Disable GPU usage
 torch.cuda.is_available = lambda: False
@@ -26,6 +27,8 @@ model = YOLO("yolov8n.pt")
 
 bucket_name = os.getenv("S3_BUCKET_NAME")
 print("[YOLO] Using S3 bucket:", bucket_name)
+
+logger = logging.getLogger(__name__)
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
@@ -69,82 +72,101 @@ def save_detection_object(prediction_uid, label, score, box):
 
 @app.post("/predict")
 def predict(file: UploadFile = File(...)):
-    print(f"[YOLO] Incoming /predict with file: {file.filename}")
-
     try:
-        s3 = boto3.client('s3')
-        ext = os.path.splitext(file.filename)[1] or ".jpg"
-        uid = str(uuid.uuid4())
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-
-        # Get user ID from the request if available
-        user_id = request.headers.get('X-User-ID', 'unknown')
+        logger.info("📥 Received prediction request")
+        if 'file' not in request.files:
+            logger.error("❌ No file part in request")
+            return jsonify({'error': 'No file part'}), 400
         
+        file = request.files['file']
+        if file.filename == '':
+            logger.error("❌ No selected file")
+            return jsonify({'error': 'No selected file'}), 400
+
+        # Get user ID from headers
+        user_id = request.headers.get('X-User-ID', 'unknown')
+        logger.info(f"👤 User ID from headers: {user_id}")
+
+        # Generate timestamp
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        logger.info(f"⏰ Generated timestamp: {timestamp}")
+
+        # Create filenames with user ID and timestamp
         original_filename = f"{user_id}/{timestamp}.jpg"
         predicted_filename = f"{user_id}/{timestamp}_predicted.jpg"
-        original_path = os.path.join(UPLOAD_DIR, original_filename)
-        predicted_path = os.path.join(PREDICTED_DIR, predicted_filename)
+        logger.info(f"📂 Original filename: {original_filename}")
+        logger.info(f"📂 Predicted filename: {predicted_filename}")
 
         # Create directories if they don't exist
-        os.makedirs(os.path.dirname(original_path), exist_ok=True)
-        os.makedirs(os.path.dirname(predicted_path), exist_ok=True)
+        original_dir = os.path.join(UPLOAD_DIR, 'original', user_id)
+        predicted_dir = os.path.join(UPLOAD_DIR, 'predicted', user_id)
+        logger.info(f"📁 Creating directories if they don't exist:")
+        logger.info(f"   - Original: {original_dir}")
+        logger.info(f"   - Predicted: {predicted_dir}")
+        
+        os.makedirs(original_dir, exist_ok=True)
+        os.makedirs(predicted_dir, exist_ok=True)
 
-        print(f"[YOLO] Will save original image to: {original_path}")
-        print(f"[YOLO] Will save predicted image to: {predicted_path}")
+        # Save original file
+        original_path = os.path.join(UPLOAD_DIR, 'original', original_filename)
+        logger.info(f"💾 Saving original file to: {original_path}")
+        file.save(original_path)
+        logger.info(f"✅ Original file saved successfully")
 
-        # Save uploaded file locally
-        print(f"[YOLO] Reading uploaded file...")
-        file_content = file.file.read()
-        print(f"[YOLO] Read {len(file_content)} bytes from uploaded file")
+        # Process with YOLO
+        logger.info("🔍 Processing image with YOLO")
+        results = model(original_path)
+        logger.info(f"✅ YOLO processing complete. Results: {results}")
 
-        print(f"[YOLO] Writing file to {original_path}")
-        with open(original_path, "wb") as f:
-            f.write(file_content)
-        print(f"[YOLO] Successfully saved original image")
+        # Save predicted image
+        predicted_path = os.path.join(UPLOAD_DIR, 'predicted', predicted_filename)
+        logger.info(f"💾 Saving predicted image to: {predicted_path}")
+        results.save(predicted_path)
+        logger.info(f"✅ Predicted image saved successfully")
 
-        # Upload original image to S3
+        # Upload to S3
         original_s3_key = f"original/{user_id}/{timestamp}.jpg"
         predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
-        print(f"[YOLO] Uploading original image to s3://{bucket_name}/{original_s3_key}")
-        s3.upload_file(original_path, bucket_name, original_s3_key)
-        print(f"[YOLO] Successfully uploaded original image to S3")
+        logger.info(f"📤 Uploading to S3:")
+        logger.info(f"   - Original: {original_s3_key}")
+        logger.info(f"   - Predicted: {predicted_s3_key}")
 
-        # Run YOLO detection
-        print(f"[YOLO] Running YOLO detection on {original_path}")
-        results = model(original_path, device="cpu")
-        print(f"[YOLO] YOLO detection completed")
-        
-        annotated_frame = results[0].plot()
-        annotated_image = Image.fromarray(annotated_frame)
-        print(f"[YOLO] Saving predicted image to {predicted_path}")
-        annotated_image.save(predicted_path)
-        print(f"[YOLO] Successfully saved predicted image")
+        try:
+            s3 = boto3.client('s3')
+            s3.upload_file(original_path, bucket_name, original_s3_key)
+            logger.info("✅ Original image uploaded to S3")
+            s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
+            logger.info("✅ Predicted image uploaded to S3")
+        except Exception as e:
+            logger.error(f"❌ S3 upload failed: {e}")
+            return jsonify({'error': 'Failed to upload to S3'}), 500
 
-        save_prediction_session(uid, original_path, predicted_path)
+        # Get labels from results
+        labels = []
+        for r in results:
+            boxes = r.boxes
+            for box in boxes:
+                cls = int(box.cls[0])
+                conf = float(box.conf[0])
+                label = f"{model.names[cls]}: {conf:.2f}"
+                labels.append(label)
+        logger.info(f"🏷️ Detected labels: {labels}")
 
-        detected_labels = []
-        for box in results[0].boxes:
-            label_idx = int(box.cls[0].item())
-            label = model.names[label_idx]
-            score = float(box.conf[0])
-            bbox = box.xyxy[0].tolist()
-            save_detection_object(uid, label, score, bbox)
-            detected_labels.append(label)
+        save_prediction_session(timestamp, original_path, predicted_path)
 
-        print(f"[YOLO] Uploading predicted image to s3://{bucket_name}/{predicted_s3_key}")
-        s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
-        print(f"[YOLO] Successfully uploaded predicted image to S3")
+        for label in labels:
+            save_detection_object(timestamp, label, conf, str(box.xyxy[0].tolist()))
 
-        return {
-            "prediction_uid": uid,
-            "detection_count": len(detected_labels),
-            "labels": detected_labels
-        }
+        return jsonify({
+            'prediction_uid': timestamp,
+            'detection_count': len(labels),
+            'labels': labels
+        })
 
     except Exception as e:
-        print("[YOLO ERROR]", str(e))
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
+        logger.error(f"❌ Error in predict endpoint: {e}")
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
 
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
