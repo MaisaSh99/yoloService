@@ -1,17 +1,18 @@
-import boto3
-from fastapi import FastAPI, HTTPException, Request, Form, UploadFile, File
-from fastapi.responses import FileResponse
-from ultralytics import YOLO
-from PIL import Image
-import sqlite3
 import os
 import uuid
+import sqlite3
 import traceback
-import torch
 from datetime import datetime
 import logging
 
-# Disable GPU usage
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.responses import FileResponse, JSONResponse
+from ultralytics import YOLO
+from PIL import Image
+import boto3
+import torch
+
+# Disable GPU
 torch.cuda.is_available = lambda: False
 
 app = FastAPI()
@@ -19,16 +20,15 @@ app = FastAPI()
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
 DB_PATH = "predictions.db"
-
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(PREDICTED_DIR, exist_ok=True)
-
-model = YOLO("yolov8n.pt")
-
 bucket_name = os.getenv("S3_BUCKET_NAME")
 print("[YOLO] Using S3 bucket:", bucket_name)
 
 logger = logging.getLogger(__name__)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(PREDICTED_DIR, exist_ok=True)
+
+model = YOLO("yolov8n.pt")
+predictions = {}
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
@@ -71,129 +71,62 @@ def save_detection_object(prediction_uid, label, score, box):
         """, (prediction_uid, label, score, str(box)))
 
 @app.post("/predict")
-def predict(file: UploadFile = File(...)):
+async def predict(request: Request, file: UploadFile = File(...)):
     try:
-        logger.info("📥 Received prediction request")
-        
-        if 'file' not in request.files:
-            logger.error("❌ No file part in request")
-            return jsonify({'error': 'No file part'}), 400
-            
-        file = request.files['file']
-        if file.filename == '':
-            logger.error("❌ No selected file")
-            return jsonify({'error': 'No selected file'}), 400
-            
-        if not file:
-            logger.error("❌ Invalid file")
-            return jsonify({'error': 'Invalid file'}), 400
-
-        # Get user ID from headers
-        user_id = request.headers.get('X-User-ID', 'unknown')
-        logger.info(f"👤 User ID from request: {user_id}")
-        
-        # Generate timestamp
+        user_id = request.headers.get("X-User-ID", "unknown")
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        logger.info(f"⏰ Generated timestamp: {timestamp}")
 
-        # Create filenames with user ID and timestamp
-        original_filename = f"{user_id}/{timestamp}.jpg"
-        predicted_filename = f"{user_id}/{timestamp}_predicted.jpg"
-        
-        logger.info(f"📁 Original filename: {original_filename}")
-        logger.info(f"📁 Predicted filename: {predicted_filename}")
-
-        # Create directories if they don't exist
-        original_dir = os.path.join('uploads', 'original', user_id)
-        predicted_dir = os.path.join('uploads', 'predicted', user_id)
-        
-        logger.info(f"📁 Creating directories if they don't exist:")
-        logger.info(f"   - Original: {original_dir}")
-        logger.info(f"   - Predicted: {predicted_dir}")
-        
+        original_dir = os.path.join("uploads", "original", user_id)
+        predicted_dir = os.path.join("uploads", "predicted", user_id)
         os.makedirs(original_dir, exist_ok=True)
         os.makedirs(predicted_dir, exist_ok=True)
 
-        # Save original file
-        original_path = os.path.join('uploads', 'original', original_filename)
-        logger.info(f"💾 Saving original file to: {original_path}")
-        file.save(original_path)
-        
-        # Verify file was saved
-        if os.path.exists(original_path):
-            file_size = os.path.getsize(original_path)
-            logger.info(f"✅ Original file saved successfully. Size: {file_size} bytes")
-        else:
-            logger.error(f"❌ Failed to save original file at: {original_path}")
-            return jsonify({'error': 'Failed to save original file'}), 500
+        # Save original image
+        original_path = os.path.join(original_dir, f"{timestamp}.jpg")
+        with open(original_path, "wb") as f:
+            f.write(await file.read())
 
-        # Process with YOLO
-        logger.info("🔍 Processing image with YOLO model")
+        # Run YOLO
         results = model(original_path)
-        
-        # Save predicted image
-        predicted_path = os.path.join('uploads', 'predicted', predicted_filename)
-        logger.info(f"💾 Saving predicted image to: {predicted_path}")
+
+        # Save prediction image
+        predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
         results.save(predicted_path)
-        
-        # Verify predicted file was saved
-        if os.path.exists(predicted_path):
-            file_size = os.path.getsize(predicted_path)
-            logger.info(f"✅ Predicted file saved successfully. Size: {file_size} bytes")
-        else:
-            logger.error(f"❌ Failed to save predicted file at: {predicted_path}")
-            return jsonify({'error': 'Failed to save predicted file'}), 500
 
         # Upload to S3
+        s3 = boto3.client('s3')
         original_s3_key = f"original/{user_id}/{timestamp}.jpg"
         predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
-        
-        logger.info(f"📤 Uploading to S3:")
-        logger.info(f"   - Original: s3://{bucket_name}/{original_s3_key}")
-        logger.info(f"   - Predicted: s3://{bucket_name}/{predicted_s3_key}")
-        
-        try:
-            s3 = boto3.client('s3')
-            s3.upload_file(original_path, bucket_name, original_s3_key)
-            logger.info("✅ Original file uploaded to S3 successfully")
-            
-            s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
-            logger.info("✅ Predicted file uploaded to S3 successfully")
-        except Exception as e:
-            logger.error(f"❌ S3 upload failed: {e}")
-            return jsonify({'error': 'Failed to upload to S3'}), 500
 
-        # Get labels from results
+        s3.upload_file(original_path, bucket_name, original_s3_key)
+        logger.info("✅ Uploaded original image to S3")
+        s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
+        logger.info("✅ Uploaded predicted image to S3")
+
+        # Extract labels
         labels = []
         for r in results:
             for c in r.boxes.cls:
                 label = model.names[int(c)]
                 labels.append(label)
-        
-        logger.info(f"🏷️ Detected labels: {labels}")
 
-        # Generate prediction UID
+        # Store prediction
         prediction_uid = str(uuid.uuid4())
-        logger.info(f"🆔 Generated prediction UID: {prediction_uid}")
+        save_prediction_session(prediction_uid, original_path, predicted_path)
+        for r in results:
+            for c, s, b in zip(r.boxes.cls, r.boxes.conf, r.boxes.xyxy):
+                save_detection_object(prediction_uid, model.names[int(c)], float(s), b.tolist())
 
-        # Store prediction info
-        predictions[prediction_uid] = {
-            'original_path': original_path,
-            'predicted_path': predicted_path,
-            'labels': labels,
-            'timestamp': datetime.now().isoformat()
-        }
-
-        return jsonify({
-            'prediction_uid': prediction_uid,
-            'detection_count': len(labels),
-            'labels': labels
+        return JSONResponse({
+            "prediction_uid": prediction_uid,
+            "detection_count": len(labels),
+            "labels": labels
         })
 
     except Exception as e:
         logger.error(f"❌ Prediction failed: {e}")
-        logger.error(f"Stack trace: {traceback.format_exc()}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(traceback.format_exc())
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
@@ -203,11 +136,7 @@ def get_prediction_by_uid(uid: str):
         if not session:
             raise HTTPException(status_code=404, detail="Prediction not found")
 
-        objects = conn.execute(
-            "SELECT * FROM detection_objects WHERE prediction_uid = ?",
-            (uid,)
-        ).fetchall()
-
+        objects = conn.execute("SELECT * FROM detection_objects WHERE prediction_uid = ?", (uid,)).fetchall()
         return {
             "uid": session["uid"],
             "timestamp": session["timestamp"],
