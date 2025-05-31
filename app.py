@@ -73,7 +73,7 @@ def save_detection_object(prediction_uid, label, score, box):
 @app.post("/predict")
 async def predict(request: Request, file: UploadFile = File(...)):
     try:
-        # ✅ Robust extraction of header (lowercase)
+        # ✅ Use lowercase header name
         print("📦 All headers:", dict(request.headers))
         user_id = request.headers.get("x-user-id") or "unknown"
         print(f"📬 Received X-User-ID: {user_id}")
@@ -137,7 +137,6 @@ async def predict(request: Request, file: UploadFile = File(...)):
         logger.error(f"❌ Prediction failed: {e}")
         logger.error(traceback.format_exc())
         return JSONResponse(content={"error": str(e)}, status_code=500)
-
 
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
