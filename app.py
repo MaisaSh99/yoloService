@@ -75,7 +75,7 @@ async def predict(request: Request, file: UploadFile = File(...)):
     try:
         # ✅ Robust extraction of header (lowercase)
         print("📦 All headers:", dict(request.headers))
-        user_id = request.headers.get("x-user-id") or "unknown"
+        user_id = request.headers.get("X-User-ID") or request.headers.get("x-user-id") or "unknown"
         print(f"📬 Received X-User-ID: {user_id}")
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -90,53 +90,63 @@ async def predict(request: Request, file: UploadFile = File(...)):
         with open(original_path, "wb") as f:
             f.write(await file.read())
 
-        # Run YOLO
-        results = model(original_path)
+        try:
+            # Run YOLO
+            results = model(original_path)
 
-        # Save prediction image
-        predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
-        annotated = results[0].plot()
-        annotated_img = Image.fromarray(annotated)
-        annotated_img.save(predicted_path)
+            # Save prediction image
+            predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
+            annotated = results[0].plot()
+            annotated_img = Image.fromarray(annotated)
+            annotated_img.save(predicted_path)
 
-        # Upload to S3
-        s3 = boto3.client('s3')
-        original_s3_key = f"original/{user_id}/{timestamp}.jpg"
-        predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
+            # Upload to S3
+            s3 = boto3.client('s3')
+            original_s3_key = f"original/{user_id}/{timestamp}.jpg"
+            predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
 
-        s3.upload_file(original_path, bucket_name, original_s3_key)
-        print(f"✅ Uploaded original image to S3: {original_s3_key}")
+            s3.upload_file(original_path, bucket_name, original_s3_key)
+            print(f"✅ Uploaded original image to S3: {original_s3_key}")
 
-        s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
-        print(f"✅ Uploaded predicted image to S3: {predicted_s3_key}")
+            s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
+            print(f"✅ Uploaded predicted image to S3: {predicted_s3_key}")
 
-        # Extract labels
-        labels = []
-        for box in results[0].boxes:
-            cls_id = int(box.cls[0].item())
-            label = model.names[cls_id]
-            labels.append(label)
+            # Extract labels
+            labels = []
+            for box in results[0].boxes:
+                cls_id = int(box.cls[0].item())
+                label = model.names[cls_id]
+                labels.append(label)
 
-        # Store prediction
-        prediction_uid = str(uuid.uuid4())
-        save_prediction_session(prediction_uid, original_path, predicted_path)
-        for box in results[0].boxes:
-            cls_id = int(box.cls[0].item())
-            label = model.names[cls_id]
-            score = float(box.conf[0])
-            bbox = box.xyxy[0].tolist()
-            save_detection_object(prediction_uid, label, score, bbox)
+            # Store prediction
+            prediction_uid = str(uuid.uuid4())
+            save_prediction_session(prediction_uid, original_path, predicted_path)
+            for box in results[0].boxes:
+                cls_id = int(box.cls[0].item())
+                label = model.names[cls_id]
+                score = float(box.conf[0])
+                bbox = box.xyxy[0].tolist()
+                save_detection_object(prediction_uid, label, score, bbox)
 
-        return JSONResponse({
-            "prediction_uid": prediction_uid,
-            "detection_count": len(labels),
-            "labels": labels
-        })
+            return JSONResponse({
+                "prediction_uid": prediction_uid,
+                "detection_count": len(labels),
+                "labels": labels
+            })
+
+        except Exception as e:
+            logger.error(f"❌ YOLO processing failed: {e}")
+            logger.error(traceback.format_exc())
+            # Clean up files if they exist
+            for path in [original_path, predicted_path]:
+                if os.path.exists(path):
+                    os.remove(path)
+            return JSONResponse(content={"error": str(e)}, status_code=200)  # Return 200 to prevent retries
 
     except Exception as e:
-        logger.error(f"❌ Prediction failed: {e}")
+        logger.error(f"❌ Request processing failed: {e}")
         logger.error(traceback.format_exc())
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return JSONResponse(content={"error": str(e)}, status_code=200)  # Return 200 to prevent retries
 
 
 @app.get("/prediction/{uid}")
