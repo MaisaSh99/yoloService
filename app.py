@@ -75,7 +75,9 @@ async def predict(request: Request, file: UploadFile = File(...)):
     try:
         # ✅ Use lowercase header name
         print("📦 All headers:", dict(request.headers))
-        user_id = request.headers.get("x-user-id") or "unknown"
+        headers = {k.lower(): v for k, v in request.headers.items()}
+        user_id = headers.get("x-user-id", "unknown")
+        print(f"✅ Using user_id={user_id}")
         print(f"📬 Received X-User-ID: {user_id}")
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
