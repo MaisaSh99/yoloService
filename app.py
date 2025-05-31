@@ -1,6 +1,6 @@
 import boto3
 from fastapi import FastAPI, HTTPException, Request, Form, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from ultralytics import YOLO
 from PIL import Image
 import sqlite3
@@ -71,17 +71,10 @@ def save_detection_object(prediction_uid, label, score, box):
         """, (prediction_uid, label, score, str(box)))
 
 @app.post("/predict")
-def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...)):
     try:
         logger.info("📥 Received prediction request")
-        if 'file' not in request.files:
-            logger.error("❌ No file part in request")
-            return jsonify({'error': 'No file part'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            logger.error("❌ No selected file")
-            return jsonify({'error': 'No selected file'}), 400
+        logger.info(f"📄 File info: {file.filename}, {file.content_type}")
 
         # Get user ID from headers
         user_id = request.headers.get('X-User-ID', 'unknown')
@@ -110,7 +103,14 @@ def predict(file: UploadFile = File(...)):
         # Save original file
         original_path = os.path.join(UPLOAD_DIR, 'original', original_filename)
         logger.info(f"💾 Saving original file to: {original_path}")
-        file.save(original_path)
+        
+        # Read file content
+        file_content = await file.read()
+        logger.info(f"📥 Read {len(file_content)} bytes from uploaded file")
+        
+        # Save file
+        with open(original_path, 'wb') as f:
+            f.write(file_content)
         logger.info(f"✅ Original file saved successfully")
 
         # Process with YOLO
@@ -139,7 +139,10 @@ def predict(file: UploadFile = File(...)):
             logger.info("✅ Predicted image uploaded to S3")
         except Exception as e:
             logger.error(f"❌ S3 upload failed: {e}")
-            return jsonify({'error': 'Failed to upload to S3'}), 500
+            return JSONResponse(
+                status_code=500,
+                content={'error': 'Failed to upload to S3'}
+            )
 
         # Get labels from results
         labels = []
@@ -157,7 +160,7 @@ def predict(file: UploadFile = File(...)):
         for label in labels:
             save_detection_object(timestamp, label, conf, str(box.xyxy[0].tolist()))
 
-        return jsonify({
+        return JSONResponse({
             'prediction_uid': timestamp,
             'detection_count': len(labels),
             'labels': labels
@@ -166,7 +169,10 @@ def predict(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"❌ Error in predict endpoint: {e}")
         logger.error(f"Stack trace: {traceback.format_exc()}")
-        return jsonify({'error': str(e)}), 500
+        return JSONResponse(
+            status_code=500,
+            content={'error': str(e)}
+        )
 
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
