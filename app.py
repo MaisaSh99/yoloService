@@ -8,6 +8,7 @@ import os
 import uuid
 import traceback
 import torch
+from datetime import datetime
 
 # Disable GPU usage
 torch.cuda.is_available = lambda: False
@@ -74,27 +75,50 @@ def predict(file: UploadFile = File(...)):
         s3 = boto3.client('s3')
         ext = os.path.splitext(file.filename)[1] or ".jpg"
         uid = str(uuid.uuid4())
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
-        original_filename = f"{uid}{ext}"
-        predicted_filename = f"{uid}_predicted{ext}"
+        # Get user ID from the request if available
+        user_id = request.headers.get('X-User-ID', 'unknown')
+        
+        original_filename = f"{user_id}/{timestamp}.jpg"
+        predicted_filename = f"{user_id}/{timestamp}_predicted.jpg"
         original_path = os.path.join(UPLOAD_DIR, original_filename)
         predicted_path = os.path.join(PREDICTED_DIR, predicted_filename)
 
+        # Create directories if they don't exist
+        os.makedirs(os.path.dirname(original_path), exist_ok=True)
+        os.makedirs(os.path.dirname(predicted_path), exist_ok=True)
+
+        print(f"[YOLO] Will save original image to: {original_path}")
+        print(f"[YOLO] Will save predicted image to: {predicted_path}")
+
         # Save uploaded file locally
+        print(f"[YOLO] Reading uploaded file...")
+        file_content = file.file.read()
+        print(f"[YOLO] Read {len(file_content)} bytes from uploaded file")
+
+        print(f"[YOLO] Writing file to {original_path}")
         with open(original_path, "wb") as f:
-            f.write(file.file.read())
+            f.write(file_content)
+        print(f"[YOLO] Successfully saved original image")
 
         # Upload original image to S3
-        original_s3_key = f"original/{original_filename}"
-        predicted_s3_key = f"predicted/{predicted_filename}"
+        original_s3_key = f"original/{user_id}/{timestamp}.jpg"
+        predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
         print(f"[YOLO] Uploading original image to s3://{bucket_name}/{original_s3_key}")
         s3.upload_file(original_path, bucket_name, original_s3_key)
+        print(f"[YOLO] Successfully uploaded original image to S3")
 
         # Run YOLO detection
+        print(f"[YOLO] Running YOLO detection on {original_path}")
         results = model(original_path, device="cpu")
+        print(f"[YOLO] YOLO detection completed")
+        
         annotated_frame = results[0].plot()
         annotated_image = Image.fromarray(annotated_frame)
+        print(f"[YOLO] Saving predicted image to {predicted_path}")
         annotated_image.save(predicted_path)
+        print(f"[YOLO] Successfully saved predicted image")
 
         save_prediction_session(uid, original_path, predicted_path)
 
@@ -109,6 +133,7 @@ def predict(file: UploadFile = File(...)):
 
         print(f"[YOLO] Uploading predicted image to s3://{bucket_name}/{predicted_s3_key}")
         s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
+        print(f"[YOLO] Successfully uploaded predicted image to S3")
 
         return {
             "prediction_uid": uid,
