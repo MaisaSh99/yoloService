@@ -70,6 +70,7 @@ def save_detection_object(prediction_uid, label, score, box):
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
 
+
 @app.post("/predict")
 async def predict(request: Request, file: UploadFile = File(...)):
     try:
@@ -87,15 +88,20 @@ async def predict(request: Request, file: UploadFile = File(...)):
 
         # Save original image
         original_path = os.path.join(original_dir, f"{timestamp}.jpg")
-        with open(original_path, "wb") as f:
-            f.write(await file.read())
+        predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
 
         try:
+            # Read file content once
+            file_content = await file.read()
+
+            # Save original image
+            with open(original_path, "wb") as f:
+                f.write(file_content)
+
             # Run YOLO
             results = model(original_path)
 
             # Save prediction image
-            predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
             annotated = results[0].plot()
             annotated_img = Image.fromarray(annotated)
             annotated_img.save(predicted_path)
@@ -127,6 +133,10 @@ async def predict(request: Request, file: UploadFile = File(...)):
                 score = float(box.conf[0])
                 bbox = box.xyxy[0].tolist()
                 save_detection_object(prediction_uid, label, score, bbox)
+
+            # Clean up files
+            os.remove(original_path)
+            os.remove(predicted_path)
 
             return JSONResponse({
                 "prediction_uid": prediction_uid,
