@@ -73,7 +73,10 @@ def save_detection_object(prediction_uid, label, score, box):
 @app.post("/predict")
 async def predict(request: Request, file: UploadFile = File(...)):
     try:
-        user_id = request.headers.get("X-User-ID", "unknown")
+        # ✅ Corrected header key
+        user_id = request.headers.get("x-user-id", "unknown")
+        print(f"📬 Received X-User-ID: {user_id}")
+
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
         original_dir = os.path.join("uploads", "original", user_id)
