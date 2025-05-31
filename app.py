@@ -74,7 +74,8 @@ def save_detection_object(prediction_uid, label, score, box):
 async def predict(request: Request, file: UploadFile = File(...)):
     try:
         # ✅ Corrected header key
-        user_id = request.headers.get("x-user-id", "unknown")
+        print("📦 All headers:", dict(request.headers))
+        user_id = next((request.headers.get(k) for k in ["X-User-ID", "x-user-id"]), "unknown")
         print(f"📬 Received X-User-ID: {user_id}")
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
