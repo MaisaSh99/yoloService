@@ -70,50 +70,39 @@ def save_detection_object(prediction_uid, label, score, box):
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
 
-
 @app.post("/predict")
 async def predict(request: Request, file: UploadFile = File(...)):
     try:
-        # Get request ID for deduplication
-        request_id = request.headers.get("x-request-id")
-        if not request_id:
-            request_id = str(uuid.uuid4())
-
-        # Get user ID with better validation
-        user_id = request.headers.get("x-user-id")
-        if not user_id or user_id.strip() == "":
-            user_id = "anonymous"
-        user_id = user_id.strip()
-
-        print(f"📦 Request ID: {request_id}")
-        print(f"📬 User ID: {user_id}")
+        # ✅ Robust extraction of header (lowercase)
+        print("📦 All headers:", dict(request.headers))
+        user_id = request.headers.get("x-user-id") or "unknown"
+        print(f"📬 Received X-User-ID: {user_id}")
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
-        # Create user-specific directories
         original_dir = os.path.join("uploads", "original", user_id)
         predicted_dir = os.path.join("uploads", "predicted", user_id)
         os.makedirs(original_dir, exist_ok=True)
         os.makedirs(predicted_dir, exist_ok=True)
 
-        # Save original image with request ID to prevent duplicates
-        original_path = os.path.join(original_dir, f"{timestamp}_{request_id}.jpg")
+        # Save original image
+        original_path = os.path.join(original_dir, f"{timestamp}.jpg")
         with open(original_path, "wb") as f:
             f.write(await file.read())
 
         # Run YOLO
         results = model(original_path)
 
-        # Save prediction image with request ID
-        predicted_path = os.path.join(predicted_dir, f"{timestamp}_{request_id}_predicted.jpg")
+        # Save prediction image
+        predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
         annotated = results[0].plot()
         annotated_img = Image.fromarray(annotated)
         annotated_img.save(predicted_path)
 
-        # Upload to S3 with request ID
+        # Upload to S3
         s3 = boto3.client('s3')
-        original_s3_key = f"original/{user_id}/{timestamp}_{request_id}.jpg"
-        predicted_s3_key = f"predicted/{user_id}/{timestamp}_{request_id}_predicted.jpg"
+        original_s3_key = f"original/{user_id}/{timestamp}.jpg"
+        predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
 
         s3.upload_file(original_path, bucket_name, original_s3_key)
         print(f"✅ Uploaded original image to S3: {original_s3_key}")
@@ -128,7 +117,7 @@ async def predict(request: Request, file: UploadFile = File(...)):
             label = model.names[cls_id]
             labels.append(label)
 
-        # Store prediction with request ID
+        # Store prediction
         prediction_uid = str(uuid.uuid4())
         save_prediction_session(prediction_uid, original_path, predicted_path)
         for box in results[0].boxes:
@@ -140,8 +129,6 @@ async def predict(request: Request, file: UploadFile = File(...)):
 
         return JSONResponse({
             "prediction_uid": prediction_uid,
-            "request_id": request_id,
-            "user_id": user_id,
             "detection_count": len(labels),
             "labels": labels
         })
