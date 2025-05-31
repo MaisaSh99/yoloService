@@ -20,7 +20,7 @@ app = FastAPI()
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
 DB_PATH = "predictions.db"
-bucket_name = os.getenv("S3_BUCKET_NAME")
+bucket_name = os.getenv('S3_BUCKET_NAME') or 'maisa-polybot-images'
 print("[YOLO] Using S3 bucket:", bucket_name)
 
 logger = logging.getLogger(__name__)
