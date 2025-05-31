@@ -91,7 +91,9 @@ async def predict(request: Request, file: UploadFile = File(...)):
 
         # Save prediction image
         predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
-        results.save(predicted_path)
+        annotated = results[0].plot()
+        annotated_img = Image.fromarray(annotated)
+        annotated_img.save(predicted_path)
 
         # Upload to S3
         s3 = boto3.client('s3')
@@ -99,23 +101,27 @@ async def predict(request: Request, file: UploadFile = File(...)):
         predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
 
         s3.upload_file(original_path, bucket_name, original_s3_key)
-        logger.info("✅ Uploaded original image to S3")
+        print(f"✅ Uploaded original image to S3: {original_s3_key}")
+
         s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
-        logger.info("✅ Uploaded predicted image to S3")
+        print(f"✅ Uploaded predicted image to S3: {predicted_s3_key}")
 
         # Extract labels
         labels = []
-        for r in results:
-            for c in r.boxes.cls:
-                label = model.names[int(c)]
-                labels.append(label)
+        for box in results[0].boxes:
+            cls_id = int(box.cls[0].item())
+            label = model.names[cls_id]
+            labels.append(label)
 
         # Store prediction
         prediction_uid = str(uuid.uuid4())
         save_prediction_session(prediction_uid, original_path, predicted_path)
-        for r in results:
-            for c, s, b in zip(r.boxes.cls, r.boxes.conf, r.boxes.xyxy):
-                save_detection_object(prediction_uid, model.names[int(c)], float(s), b.tolist())
+        for box in results[0].boxes:
+            cls_id = int(box.cls[0].item())
+            label = model.names[cls_id]
+            score = float(box.conf[0])
+            bbox = box.xyxy[0].tolist()
+            save_detection_object(prediction_uid, label, score, bbox)
 
         return JSONResponse({
             "prediction_uid": prediction_uid,
