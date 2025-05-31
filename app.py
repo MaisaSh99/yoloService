@@ -73,9 +73,9 @@ def save_detection_object(prediction_uid, label, score, box):
 @app.post("/predict")
 async def predict(request: Request, file: UploadFile = File(...)):
     try:
-        # ✅ Corrected header key
+        # ✅ Robust extraction of header (lowercase)
         print("📦 All headers:", dict(request.headers))
-        user_id = next((request.headers.get(k) for k in ["X-User-ID", "x-user-id"]), "unknown")
+        user_id = request.headers.get("x-user-id") or "unknown"
         print(f"📬 Received X-User-ID: {user_id}")
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -137,6 +137,7 @@ async def predict(request: Request, file: UploadFile = File(...)):
         logger.error(f"❌ Prediction failed: {e}")
         logger.error(traceback.format_exc())
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
 
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
