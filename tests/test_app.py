@@ -68,7 +68,7 @@ def test_get_predictions_by_score_valid():
 def test_get_predictions_by_score_invalid():
     response = client.get("/predictions/score/1.5")
     assert response.status_code == 400
-    assert "Score must be between 0 and 1" in response.text
+    assert "Score must be between 0.0 and 1.0" in response.text
 
 def test_get_original_image():
     response = client.get(f"/image/original/test_image.jpg")
