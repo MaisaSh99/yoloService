@@ -73,7 +73,6 @@ def save_detection_object(prediction_uid, label, score, box):
 @app.post("/predict")
 async def predict(request: Request, file: UploadFile = File(...)):
     try:
-        # ✅ Use lowercase header name
         print("📦 All headers:", dict(request.headers))
         headers = {k.lower(): v for k, v in request.headers.items()}
         user_id = headers.get("x-user-id", "unknown")
@@ -86,44 +85,34 @@ async def predict(request: Request, file: UploadFile = File(...)):
         os.makedirs(original_dir, exist_ok=True)
         os.makedirs(predicted_dir, exist_ok=True)
 
-        # Save original image
         original_path = os.path.join(original_dir, f"{timestamp}.jpg")
         with open(original_path, "wb") as f:
             f.write(await file.read())
 
-        # Run YOLO
         results = model(original_path)
 
-        # Save prediction image
         predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
         annotated = results[0].plot()
         annotated_img = Image.fromarray(annotated)
         annotated_img.save(predicted_path)
 
-        # Upload to S3
         s3 = boto3.client('s3')
         original_s3_key = f"original/{user_id}/{timestamp}.jpg"
         predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
 
         s3.upload_file(original_path, bucket_name, original_s3_key)
         print(f"✅ Uploaded original image to S3: {original_s3_key}")
-
         s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
         print(f"✅ Uploaded predicted image to S3: {predicted_s3_key}")
 
-        # Extract labels
         labels = []
+        prediction_uid = str(uuid.uuid4())
+        save_prediction_session(prediction_uid, original_path, predicted_path)
+
         for box in results[0].boxes:
             cls_id = int(box.cls[0].item())
             label = model.names[cls_id]
             labels.append(label)
-
-        # Store prediction
-        prediction_uid = str(uuid.uuid4())
-        save_prediction_session(prediction_uid, original_path, predicted_path)
-        for box in results[0].boxes:
-            cls_id = int(box.cls[0].item())
-            label = model.names[cls_id]
             score = float(box.conf[0])
             bbox = box.xyxy[0].tolist()
             save_detection_object(prediction_uid, label, score, bbox)
@@ -178,6 +167,9 @@ def get_predictions_by_label(label: str):
 
 @app.get("/predictions/score/{min_score}")
 def get_predictions_by_score(min_score: float):
+    if not (0.0 <= min_score <= 1.0):
+        raise HTTPException(status_code=400, detail="Score must be between 0.0 and 1.0")
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("""
