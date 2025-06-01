@@ -1,14 +1,18 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
-from fastapi.responses import FileResponse
-from ultralytics import YOLO
-from PIL import Image
-import sqlite3
 import os
 import uuid
-import shutil
+import sqlite3
+import traceback
+from datetime import datetime
+import logging
+
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.responses import FileResponse, JSONResponse
+from ultralytics import YOLO
+from PIL import Image
+import boto3
 import torch
 
-# Disable GPU usage
+# Disable GPU
 torch.cuda.is_available = lambda: False
 
 app = FastAPI()
@@ -16,14 +20,16 @@ app = FastAPI()
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
 DB_PATH = "predictions.db"
+bucket_name = os.getenv('S3_BUCKET_NAME') or 'maisa-polybot-images'
+print("[YOLO] Using S3 bucket:", bucket_name)
 
+logger = logging.getLogger(__name__)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PREDICTED_DIR, exist_ok=True)
 
-# Load YOLO model
 model = YOLO("yolov8n.pt")
+predictions = {}
 
-# Initialize SQLite database
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
@@ -65,37 +71,73 @@ def save_detection_object(prediction_uid, label, score, box):
         """, (prediction_uid, label, score, str(box)))
 
 @app.post("/predict")
-def predict(file: UploadFile = File(...)):
-    ext = os.path.splitext(file.filename)[1]
-    uid = str(uuid.uuid4())
-    original_path = os.path.join(UPLOAD_DIR, uid + ext)
-    predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
+async def predict(request: Request, file: UploadFile = File(...)):
+    try:
+        # ✅ Use lowercase header name
+        print("📦 All headers:", dict(request.headers))
+        headers = {k.lower(): v for k, v in request.headers.items()}
+        user_id = headers.get("x-user-id", "unknown")
+        print(f"📬 Received X-User-ID: {user_id}")
 
-    with open(original_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
-    results = model(original_path, device="cpu")
+        original_dir = os.path.join("uploads", "original", user_id)
+        predicted_dir = os.path.join("uploads", "predicted", user_id)
+        os.makedirs(original_dir, exist_ok=True)
+        os.makedirs(predicted_dir, exist_ok=True)
 
-    annotated_frame = results[0].plot()
-    annotated_image = Image.fromarray(annotated_frame)
-    annotated_image.save(predicted_path)
+        # Save original image
+        original_path = os.path.join(original_dir, f"{timestamp}.jpg")
+        with open(original_path, "wb") as f:
+            f.write(await file.read())
 
-    save_prediction_session(uid, original_path, predicted_path)
+        # Run YOLO
+        results = model(original_path)
 
-    detected_labels = []
-    for box in results[0].boxes:
-        label_idx = int(box.cls[0].item())
-        label = model.names[label_idx]
-        score = float(box.conf[0])
-        bbox = box.xyxy[0].tolist()
-        save_detection_object(uid, label, score, bbox)
-        detected_labels.append(label)
+        # Save prediction image
+        predicted_path = os.path.join(predicted_dir, f"{timestamp}_predicted.jpg")
+        annotated = results[0].plot()
+        annotated_img = Image.fromarray(annotated)
+        annotated_img.save(predicted_path)
 
-    return {
-        "prediction_uid": uid,
-        "detection_count": len(results[0].boxes),
-        "labels": detected_labels
-    }
+        # Upload to S3
+        s3 = boto3.client('s3')
+        original_s3_key = f"original/{user_id}/{timestamp}.jpg"
+        predicted_s3_key = f"predicted/{user_id}/{timestamp}_predicted.jpg"
+
+        s3.upload_file(original_path, bucket_name, original_s3_key)
+        print(f"✅ Uploaded original image to S3: {original_s3_key}")
+
+        s3.upload_file(predicted_path, bucket_name, predicted_s3_key)
+        print(f"✅ Uploaded predicted image to S3: {predicted_s3_key}")
+
+        # Extract labels
+        labels = []
+        for box in results[0].boxes:
+            cls_id = int(box.cls[0].item())
+            label = model.names[cls_id]
+            labels.append(label)
+
+        # Store prediction
+        prediction_uid = str(uuid.uuid4())
+        save_prediction_session(prediction_uid, original_path, predicted_path)
+        for box in results[0].boxes:
+            cls_id = int(box.cls[0].item())
+            label = model.names[cls_id]
+            score = float(box.conf[0])
+            bbox = box.xyxy[0].tolist()
+            save_detection_object(prediction_uid, label, score, bbox)
+
+        return JSONResponse({
+            "prediction_uid": prediction_uid,
+            "detection_count": len(labels),
+            "labels": labels
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Prediction failed: {e}")
+        logger.error(traceback.format_exc())
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
@@ -105,11 +147,7 @@ def get_prediction_by_uid(uid: str):
         if not session:
             raise HTTPException(status_code=404, detail="Prediction not found")
 
-        objects = conn.execute(
-            "SELECT * FROM detection_objects WHERE prediction_uid = ?",
-            (uid,)
-        ).fetchall()
-
+        objects = conn.execute("SELECT * FROM detection_objects WHERE prediction_uid = ?", (uid,)).fetchall()
         return {
             "uid": session["uid"],
             "timestamp": session["timestamp"],
@@ -136,16 +174,10 @@ def get_predictions_by_label(label: str):
             WHERE do.label = ?
         """, (label,)).fetchall()
 
-        if not rows:
-            raise HTTPException(status_code=404, detail="Label not found")
-
         return [{"uid": row["uid"], "timestamp": row["timestamp"]} for row in rows]
 
 @app.get("/predictions/score/{min_score}")
 def get_predictions_by_score(min_score: float):
-    if not (0.0 <= min_score <= 1.0):
-        raise HTTPException(status_code=400, detail="Score must be between 0 and 1")
-
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("""

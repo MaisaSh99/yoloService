@@ -1,4 +1,4 @@
-name: Yolo Deploy
+name: Yolo Deploy (Prod)
 
 on:
   push:
@@ -33,16 +33,41 @@ jobs:
                 IdentityFile ~/.ssh/id_rsa
                 StrictHostKeyChecking no" > ~/.ssh/config
 
-      - name: Clone or Pull Repo on EC2
-        run: |
-          ssh ec2 "if [ -d ~/${REPO_NAME} ]; then cd ~/${REPO_NAME} && git pull origin main; else git clone ${REPO_URL} ~/${REPO_NAME}; fi"
-
-      - name: Copy service file and deploy script to EC2
+      - name: Upload files to EC2
         run: |
           scp yolo.service ec2:~/yolo.service
-          scp deploy.sh ec2:~/deploy.sh
-          ssh ec2 "chmod +x ~/deploy.sh"
 
-      - name: Run deployment script on EC2
+      - name: SSH Deploy Script (Prod)
         run: |
-          ssh ec2 "~/deploy.sh"
+          ssh ec2 << 'EOF'
+            echo "✅ Installing dependencies..."
+            sudo apt update
+            sudo apt install -y git python3 python3-pip python3-venv
+
+            echo "📁 Setting up repo..."
+            cd /home/ubuntu
+            if [ -d "yoloServiceNEW" ]; then
+              cd yoloServiceNEW
+              git pull origin main
+            else
+              git clone ${REPO_URL} yoloServiceNEW
+              cd yoloServiceNEW
+            fi
+
+            echo "📦 Setting up Python environment..."
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            pip install boto3
+
+            echo "⚙️ Updating systemd service..."
+            sudo mv ~/yolo.service /etc/systemd/system/yolo.service
+            sudo systemctl daemon-reload
+            sudo systemctl restart yolo.service
+            sudo systemctl enable yolo.service
+
+            echo "✅ YOLO production deployed!"
+          EOF
