@@ -10,3 +10,6 @@ ultralytics>=8.0.0
 python-multipart>=0.0.6
 httpx
 pytest
+
+# ✅ Add boto3 for S3 support
+boto3
