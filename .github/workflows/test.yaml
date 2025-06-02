@@ -70,7 +70,11 @@ jobs:
           ssh ec2 << 'EOF'
             cd '${{ env.REPO_NAME }}'
             source .venv/bin/activate
-            export S3_BUCKET_NAME="maisa-dev-bucket"
-            echo "📛 S3_BUCKET_NAME is: $S3_BUCKET_NAME"
+            if [[ \"${GITHUB_REF_NAME}\" == \"main\" ]]; then
+              export S3_BUCKET_NAME='maisa-polybot-images'
+            else
+              export S3_BUCKET_NAME='maisa-dev-bucket'
+              fi
+          echo \"🧪 S3_BUCKET_NAME=\$S3_BUCKET_NAME\"
             pytest tests/test_app.py --disable-warnings -v
           EOF
