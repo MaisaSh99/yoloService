@@ -4,7 +4,7 @@ import shutil
 import glob
 from fastapi.testclient import TestClient
 import time
-import json
+import boto3
 
 # Add project root to sys.path to import app
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -16,6 +16,8 @@ original_dir = "uploads/original"
 predicted_dir = "uploads/predicted"
 test_image_src = "tests/test_image.jpg"
 test_image_dst = os.path.join(original_dir, "test_image.jpg")
+S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME")
+S3_TEST_KEY = "test_image.jpg"
 
 # Global variable to share prediction ID between tests
 prediction_uid = None
@@ -23,10 +25,23 @@ prediction_uid = None
 def setup_module(module):
     os.makedirs(original_dir, exist_ok=True)
     os.makedirs(predicted_dir, exist_ok=True)
-    if os.path.exists(test_image_src):
-        shutil.copy(test_image_src, test_image_dst)
+
+    if S3_BUCKET_NAME:
+        s3 = boto3.client("s3")
+        try:
+            s3.download_file(S3_BUCKET_NAME, S3_TEST_KEY, test_image_dst)
+        except s3.exceptions.ClientError:
+            if os.path.exists(test_image_src):
+                print("Uploading test image to S3...")
+                s3.upload_file(test_image_src, S3_BUCKET_NAME, S3_TEST_KEY)
+                s3.download_file(S3_BUCKET_NAME, S3_TEST_KEY, test_image_dst)
+            else:
+                raise FileNotFoundError(f"Test image not found at {test_image_src}")
     else:
-        raise FileNotFoundError(f"Test image not found at {test_image_src}")
+        if os.path.exists(test_image_src):
+            shutil.copy(test_image_src, test_image_dst)
+        else:
+            raise FileNotFoundError(f"Test image not found at {test_image_src}")
 
 def test_predict_with_real_image():
     global prediction_uid
@@ -67,8 +82,8 @@ def test_get_predictions_by_score_valid():
 
 def test_get_predictions_by_score_invalid():
     response = client.get("/predictions/score/1.5")
-    assert response.status_code == 400
-    assert "Score must be between 0.0 and 1.0" in response.text
+    assert response.status_code == 422
+    assert "should be less than or equal to" in response.text
 
 def test_get_original_image():
     response = client.get(f"/image/original/test_image.jpg")
