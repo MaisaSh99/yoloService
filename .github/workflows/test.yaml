@@ -35,10 +35,13 @@ jobs:
 
       - name: Setup and Prepare EC2 for Testing
         run: |
-          ssh ec2 "
+          ssh ec2 << 'EOF'
             set -e
+
             if [ -d '${{ env.REPO_NAME }}' ]; then
-              cd '${{ env.REPO_NAME }}' && git fetch origin && git reset --hard origin/main
+              cd '${{ env.REPO_NAME }}'
+              git fetch origin
+              git reset --hard origin/main
             else
               git clone '${{ env.REPO_URL }}'
               cd '${{ env.REPO_NAME }}'
@@ -49,22 +52,25 @@ jobs:
 
             python3 -m venv .venv
             source .venv/bin/activate
-            export S3_BUCKET_NAME='maisa-dev-bucket'
 
             pip install --upgrade pip
             pip install -r torch-requirements.txt
             pip install -r requirements.txt
-            pip install pytest
-            pip install opencv-python numpy
+            pip install pytest opencv-python numpy
 
             mkdir -p uploads/original uploads/predicted tests
-            python -c \"import cv2, numpy as np; cv2.imwrite('tests/test_image.jpg', np.zeros((100, 100, 3), dtype=np.uint8))\"
-          "
+
+            if [ ! -f tests/test_image.jpg ]; then
+              python -c "import cv2, numpy as np; cv2.imwrite('tests/test_image.jpg', np.zeros((100, 100, 3), dtype=np.uint8))"
+            fi
+          EOF
 
       - name: Run Tests on EC2
         run: |
-          ssh ec2 "
+          ssh ec2 << 'EOF'
             cd '${{ env.REPO_NAME }}'
             source .venv/bin/activate
+            export S3_BUCKET_NAME="maisa-dev-bucket"
+            echo "📛 S3_BUCKET_NAME is: $S3_BUCKET_NAME"
             pytest tests/test_app.py --disable-warnings -v
-          "
+          EOF
