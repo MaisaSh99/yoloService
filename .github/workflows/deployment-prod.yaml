@@ -36,6 +36,7 @@ jobs:
       - name: Upload files to EC2
         run: |
           scp yolo.service ec2:~/yolo.service
+          scp install-otelcol.sh ec2:~/install-otelcol.sh
 
       - name: SSH Deploy Script (Prod)
         run: |
@@ -64,11 +65,15 @@ jobs:
             pip install -r requirements.txt
             pip install boto3
 
+            echo "🛠️ Running OpenTelemetry Collector setup..."
+            chmod +x ~/install-otelcol.sh
+            sudo ~/install-otelcol.sh
+
             echo "⚙️ Updating systemd service..."
             sudo mv ~/yolo.service /etc/systemd/system/yolo.service
             sudo systemctl daemon-reload
             sudo systemctl restart yolo.service
             sudo systemctl enable yolo.service
 
-            echo "✅ YOLO production deployed!"
+            echo "✅ YOLO production deployed with OpenTelemetry!"
           EOF
