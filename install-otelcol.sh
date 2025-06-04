@@ -1,18 +1,19 @@
 #!/bin/bash
-set -e
+
+echo "🛠️ Running OpenTelemetry Collector setup..."
 
 echo "📦 Installing OpenTelemetry Collector..."
-
 sudo apt update
 sudo apt install -y wget gnupg
 
-wget -qO - https://packages.signalfx.com/publickey | sudo apt-key add -
-echo "deb [signed-by=/usr/share/keyrings/opentelemetry-collector.gpg] https://packages.signalfx.com/debs stable main" | sudo tee /etc/apt/sources.list.d/opentelemetry-collector.list
+wget -qO - https://apt.opentelemetry.io/otel-gpg-key.pub | sudo gpg --dearmor -o /usr/share/keyrings/otel-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/otel-archive-keyring.gpg] https://apt.opentelemetry.io/apt stable main" | sudo tee /etc/apt/sources.list.d/otel.list
 
 sudo apt update
-sudo apt install -y otelcol
+sudo apt install -y otel-collector
 
-cat <<EOF | sudo tee /etc/otelcol/config.yaml
+echo "⚙️ Configuring Collector..."
+sudo tee /etc/otelcol/config.yaml > /dev/null <<EOF
 receivers:
   hostmetrics:
     collection_interval: 15s
@@ -40,5 +41,4 @@ echo "🔁 Restarting otelcol..."
 sudo systemctl restart otelcol
 sudo systemctl enable otelcol
 
-echo "✅ Otelcol is running. You can test it via:"
-echo "curl http://localhost:8889/metrics"
+echo "✅ OpenTelemetry Collector is installed and running!"
