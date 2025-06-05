@@ -44,15 +44,15 @@ jobs:
 
             echo "📁 Cloning or updating repo..."
             cd /home/ubuntu
-            if [ -d "yoloService" ]; then
-              cd yoloService
+            if [ -d "yoloServiceNEW" ]; then
+              cd yoloServiceNEW
               git reset --hard
               git clean -fd
               git checkout main
               git pull origin main
             else
-              git clone https://github.com/${REPO}.git yoloService
-              cd yoloService
+              git clone https://github.com/${REPO}.git yoloServiceNEW
+              cd yoloServiceNEW
               git checkout main
             fi
 
