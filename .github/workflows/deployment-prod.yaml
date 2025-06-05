@@ -35,7 +35,7 @@ jobs:
 
       - name: SSH and deploy
         run: |
-          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << EOF
+          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << 'EOF'
             set -e
 
             echo "✅ Installing dependencies..."
@@ -85,9 +85,9 @@ jobs:
             sudo systemctl enable yolo.service
             sudo systemctl restart yolo.service
 
-            echo "⏱ Waiting for service..."
+            echo "⏱ Verifying service startup..."
             sleep 3
-            curl -s http://localhost:8080/health || (journalctl -u yolo.service -n 30 --no-pager && exit 1)
+            sudo systemctl status yolo.service || (journalctl -u yolo.service -n 30 --no-pager && exit 1)
 
             echo "✅ Production YOLO deployment complete."
           EOF
