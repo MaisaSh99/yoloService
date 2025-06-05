@@ -18,7 +18,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure SSH
+      - name: Configure SSH (Prod)
         env:
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -33,9 +33,12 @@ jobs:
                 IdentityFile ~/.ssh/id_rsa
                 StrictHostKeyChecking no" > ~/.ssh/config
 
-      - name: Upload files to EC2
+      - name: Upload files to EC2 (Prod)
         run: |
           scp yolo.service ec2:~/yolo.service
+          scp otelcol-config.yaml ec2:~/otelcol-config.yaml
+          scp .github/scripts/install_otelcol.sh ec2:~/install_otelcol.sh
+          scp .github/scripts/install_prometheus.sh ec2:~/install_prometheus.sh
 
       - name: SSH Deploy Script (Prod)
         run: |
@@ -66,62 +69,17 @@ jobs:
             pip install -r requirements.txt
             pip install boto3
 
-            echo "🛠️ Installing OpenTelemetry Collector (binary)..."
-            cd /tmp
-            wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.101.0/otelcol_0.101.0_linux_amd64.tar.gz
-            tar -xvf otelcol_0.101.0_linux_amd64.tar.gz
-            sudo mv otelcol /usr/local/bin/
+            echo "📊 Installing OpenTelemetry & Prometheus..."
+            chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
+            sudo mv ~/otelcol-config.yaml /etc/otelcol/config.yaml
+            sudo ~/install_otelcol.sh
+            sudo ~/install_prometheus.sh
 
-            echo "⚙️ Configuring OpenTelemetry systemd service..."
-            sudo mkdir -p /etc/otelcol
-            sudo tee /etc/systemd/system/otelcol.service > /dev/null <<EOL
-            [Unit]
-            Description=OpenTelemetry Collector
-            After=network.target
-            
-            [Service]
-            ExecStart=/usr/local/bin/otelcol --config /etc/otelcol/config.yaml
-            Restart=always
-            
-            [Install]
-            WantedBy=multi-user.target
-            EOL
-            
-                        echo "⚙️ Creating dummy config.yaml"
-                        sudo tee /etc/otelcol/config.yaml > /dev/null <<EOL
-            receivers:
-              hostmetrics:
-                collection_interval: 30s
-                scrapers:
-                  cpu:
-                  memory:
-                  disk:
-                  filesystem:
-                  load:
-                  network:
-                  paging:
-                  processes:
-            
-            exporters:
-              logging:
-                loglevel: info
-            
-            service:
-              pipelines:
-                metrics:
-                  receivers: [hostmetrics]
-                  exporters: [logging]
-            EOL
-            
-                        sudo systemctl daemon-reload
-                        sudo systemctl enable otelcol
-                        sudo systemctl restart otelcol
-            
-                        echo "⚙️ Updating YOLO systemd service..."
-                        sudo mv ~/yolo.service /etc/systemd/system/yolo.service
-                        sudo systemctl daemon-reload
-                        sudo systemctl restart yolo.service
-                        sudo systemctl enable yolo.service
-            
-                        echo "✅ YOLO production deployed with OpenTelemetry binary!"
-                      EOF
+            echo "⚙️ Updating YOLO production service..."
+            sudo mv ~/yolo.service /etc/systemd/system/yolo.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable yolo.service
+            sudo systemctl restart yolo.service
+
+            echo "✅ Production YOLO + Observability setup complete."
+          EOF
