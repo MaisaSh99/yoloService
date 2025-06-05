@@ -64,8 +64,9 @@ jobs:
             source venv/bin/activate
             export S3_BUCKET_NAME="maisa-dev-bucket"
             pip install --upgrade pip
+            pip install -r torch-requirements.txt
             pip install -r requirements.txt
-            pip install boto3
+            pip install opencv-python numpy boto3
 
             echo "📊 Installing OpenTelemetry & Prometheus..."
             chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
@@ -82,6 +83,10 @@ jobs:
             sudo systemctl daemon-reload
             sudo systemctl enable yolo-dev.service
             sudo systemctl restart yolo-dev.service
+
+            echo "⏱ Waiting for service..."
+            sleep 3
+            curl -s http://localhost:8080/health || (journalctl -u yolo-dev.service -n 30 --no-pager && exit 1)
 
             echo "✅ Dev YOLO deployment complete."
           EOF
