@@ -73,8 +73,9 @@ jobs:
             echo "📊 Installing OpenTelemetry & Prometheus..."
             chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
             sudo mv ~/otelcol-config.yaml /etc/otelcol/config.yaml
-            sudo ~/install_otelcol.sh
-            sudo ~/install_prometheus.sh
+            export OTELCOL_IP="$EC2_DEV_HOST"
+            sudo -E ~/install_otelcol.sh
+            sudo -E ~/install_prometheus.sh
 
             echo "⚙️ Updating YOLO dev service..."
             sudo mv ~/yolo-dev.service /etc/systemd/system/yolo-dev.service

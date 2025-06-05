@@ -1,29 +1,51 @@
 #!/bin/bash
+set -e
 
-echo "📦 Installing Prometheus..."
+PROM_VERSION="2.51.1"
+FOLDER="prometheus-${PROM_VERSION}.linux-amd64"
+FILENAME="${FOLDER}.tar.gz"
+
+OTELCOL_IP=${OTELCOL_IP:-"127.0.0.1"}  # fallback to localhost if not passed
+
+echo "📦 Installing Prometheus v${PROM_VERSION}..."
 
 cd /tmp
-
-# Hardcoded working version
-PROM_VERSION="2.51.1"
-FILENAME="prometheus-${PROM_VERSION}.linux-amd64.tar.gz"
-FOLDER="prometheus-${PROM_VERSION}.linux-amd64"
-
 wget https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/${FILENAME}
 tar -xzf ${FILENAME}
-sudo mv ${FOLDER} /opt/prometheus
+cd ${FOLDER}
 
-# Create systemd service
+# Move binaries to system path
+sudo mv prometheus /usr/local/bin/
+sudo mv promtool /usr/local/bin/
+
+# Setup configuration and data directories
+sudo mkdir -p /etc/prometheus /var/lib/prometheus
+sudo cp -r consoles console_libraries /etc/prometheus/
+
+# Generate config
+sudo tee /etc/prometheus/prometheus.yml > /dev/null <<EOL
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['${OTELCOL_IP}:8889']
+EOL
+
+# Create Prometheus systemd service
 sudo tee /etc/systemd/system/prometheus.service > /dev/null <<EOL
 [Unit]
 Description=Prometheus Monitoring
-Wants=network-online.target
-After=network-online.target
+After=network.target
 
 [Service]
-ExecStart=/opt/prometheus/prometheus \
-  --config.file=/opt/prometheus/prometheus.yml \
-  --storage.tsdb.path=/opt/prometheus/data \
+ExecStart=/usr/local/bin/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/var/lib/prometheus/ \
   --web.listen-address=:9090
 Restart=always
 
@@ -31,7 +53,9 @@ Restart=always
 WantedBy=multi-user.target
 EOL
 
-# Start Prometheus
+# Reload and start service
 sudo systemctl daemon-reload
 sudo systemctl enable prometheus
 sudo systemctl restart prometheus
+
+echo "✅ Prometheus v${PROM_VERSION} installed and running!"
