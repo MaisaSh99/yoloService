@@ -33,6 +33,9 @@ jobs:
                 IdentityFile ~/.ssh/id_rsa
                 StrictHostKeyChecking no" > ~/.ssh/config
 
+      - name: Debug SSH
+        run: ssh -v ec2-dev echo "✅ SSH to Dev works"
+
       - name: Upload files to EC2 (Dev)
         run: |
           scp yolo-dev.service ec2-dev:~/yolo-dev.service

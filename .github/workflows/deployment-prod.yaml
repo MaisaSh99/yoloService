@@ -33,6 +33,9 @@ jobs:
                 IdentityFile ~/.ssh/id_rsa
                 StrictHostKeyChecking no" > ~/.ssh/config
 
+      - name: Debug SSH
+        run: ssh -v ec2 echo "✅ SSH to Prod works"
+
       - name: Upload files to EC2 (Prod)
         run: |
           scp yolo.service ec2:~/yolo.service
@@ -75,11 +78,11 @@ jobs:
             sudo ~/install_otelcol.sh
             sudo ~/install_prometheus.sh
 
-            echo "⚙️ Updating YOLO production service..."
+            echo "⚙️ Updating YOLO prod service..."
             sudo mv ~/yolo.service /etc/systemd/system/yolo.service
             sudo systemctl daemon-reload
             sudo systemctl enable yolo.service
             sudo systemctl restart yolo.service
 
-            echo "✅ Production YOLO + Observability setup complete."
+            echo "✅ Prod YOLO + Observability setup complete."
           EOF
