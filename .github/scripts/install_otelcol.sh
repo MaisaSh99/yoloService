@@ -12,8 +12,8 @@ sudo mv otelcol /usr/local/bin/otelcol
 # Create config directory
 sudo mkdir -p /etc/otelcol
 
-# Copy config from repo (make sure otelcol-config.yaml exists in project root)
-sudo cp ~/yoloService/otelcol-config.yaml /etc/otelcol/config.yaml
+# Copy config from home directory (uploaded during deployment)
+sudo cp ~/otelcol-config.yaml /etc/otelcol/config.yaml
 
 # Create systemd service
 sudo tee /etc/systemd/system/otelcol.service > /dev/null <<EOL
@@ -33,3 +33,5 @@ EOL
 sudo systemctl daemon-reload
 sudo systemctl enable otelcol
 sudo systemctl restart otelcol
+
+echo "✅ OpenTelemetry Collector installed and running!"
