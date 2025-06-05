@@ -87,7 +87,14 @@ jobs:
 
             echo "⏱ Waiting for service..."
             sleep 3
-            curl -s http://localhost:8080/health || (journalctl -u yolo-dev.service -n 30 --no-pager && exit 1)
+            if curl -s http://localhost:8080/health | grep -q "ok"; then
+              echo "✅ Health check passed."
+            else
+              echo "❌ Health check failed. Showing logs:"
+              journalctl -u yolo-dev.service -n 30 --no-pager
+              exit 1
+            fi
+
 
             echo "✅ Dev YOLO deployment complete."
           EOF
