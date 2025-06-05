@@ -44,15 +44,15 @@ jobs:
 
             echo "📁 Cloning or updating repo..."
             cd /home/ubuntu
-            if [ -d "yoloServiceNEW" ]; then
-              cd yoloServiceNEW
+            if [ -d "yoloService" ]; then
+              cd yoloService
               git reset --hard
               git clean -fd
               git checkout main
               git pull origin main
             else
-              git clone https://github.com/${REPO}.git yoloServiceNEW
-              cd yoloServiceNEW
+              git clone https://github.com/${REPO}.git yoloService
+              cd yoloService
               git checkout main
             fi
 
@@ -70,6 +70,7 @@ jobs:
 
             echo "📊 Installing OpenTelemetry & Prometheus..."
             chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
+            sudo mkdir -p /etc/otelcol
             sudo mv ~/otelcol-config.yaml /etc/otelcol/config.yaml
             export OTELCOL_IP="$EC2_IP"
             sudo -E ~/install_otelcol.sh
