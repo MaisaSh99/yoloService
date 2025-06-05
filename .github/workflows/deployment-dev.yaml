@@ -1,4 +1,4 @@
-name: Deploy Yolo (Dev)
+name: Deploy YOLO (Dev)
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   deploy-yolo-dev:
-    name: Deploy YOLO Dev to EC2
+    name: Deploy to EC2 (Dev)
     runs-on: ubuntu-latest
 
     env:
@@ -21,32 +21,33 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup SSH key
+      - name: Set up SSH key
         run: |
           echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
           chmod 600 key.pem
 
-      - name: Upload deployment files to Dev
+      - name: Upload service and observability scripts
         run: |
           scp -i key.pem -o StrictHostKeyChecking=no yolo-dev.service $EC2_USER@$EC2_IP:~/yolo-dev.service
           scp -i key.pem -o StrictHostKeyChecking=no otelcol-config.yaml $EC2_USER@$EC2_IP:~/otelcol-config.yaml
           scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_otelcol.sh $EC2_USER@$EC2_IP:~/install_otelcol.sh
           scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_prometheus.sh $EC2_USER@$EC2_IP:~/install_prometheus.sh
 
-      - name: SSH and deploy on Dev
+      - name: SSH and deploy
         run: |
           ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << EOF
             set -e
 
             echo "✅ Installing dependencies..."
             sudo apt update
-            sudo apt install -y git python3 python3-pip python3-venv wget curl tar unzip
+            sudo apt install -y git python3 python3-pip python3-venv wget curl unzip
 
             echo "📁 Cloning or updating repo..."
             cd /home/ubuntu
             if [ -d "yoloService" ]; then
               cd yoloService
               git reset --hard
+              git clean -fd
               git checkout dev
               git pull origin dev
             else
@@ -55,7 +56,10 @@ jobs:
               git checkout dev
             fi
 
-            echo "🐍 Setting up virtual environment..."
+            echo "📦 Setting up Python venv..."
+            if [ -d "venv" ]; then
+              rm -rf venv
+            fi
             python3 -m venv venv
             source venv/bin/activate
             export S3_BUCKET_NAME="maisa-dev-bucket"
@@ -70,7 +74,10 @@ jobs:
             sudo -E ~/install_otelcol.sh
             sudo -E ~/install_prometheus.sh
 
-            echo "🛠️ Setting up YOLO dev systemd service..."
+            echo "🧼 Killing old service if running..."
+            sudo systemctl stop yolo-dev.service || true
+
+            echo "⚙️ Enabling and starting yolo-dev.service"
             sudo mv ~/yolo-dev.service /etc/systemd/system/yolo-dev.service
             sudo systemctl daemon-reload
             sudo systemctl enable yolo-dev.service
