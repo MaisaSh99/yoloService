@@ -35,10 +35,15 @@ jobs:
 
       - name: SSH and deploy
         run: |
-          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << EOF
+          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << 'EOF'
             set -e
 
             echo "✅ Installing dependencies..."
+            while sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+              echo "🔒 Waiting for apt lock to be released..."
+              sleep 3
+            done
+
             sudo apt update
             sudo apt install -y git python3 python3-pip python3-venv wget curl unzip
 
