@@ -78,6 +78,7 @@ jobs:
             sudo mv ~/otelcol-config.yaml /etc/otelcol/config.yaml
             export OTELCOL_IP="$EC2_IP"
             sudo -E ~/install_otelcol.sh
+            export OTELCOL_IP="10.0.1.143"
             sudo -E ~/install_prometheus.sh
 
             echo "🧼 Killing old service if running..."
