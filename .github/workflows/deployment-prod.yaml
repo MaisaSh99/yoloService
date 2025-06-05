@@ -28,7 +28,7 @@ jobs:
 
       - name: Upload service and observability scripts
         run: |
-          scp -i key.pem -o StrictHostKeyChecking=no yolo-prod.service $EC2_USER@$EC2_IP:~/yolo-prod.service
+          scp -i key.pem -o StrictHostKeyChecking=no yolo.service $EC2_USER@$EC2_IP:~/yolo.service
           scp -i key.pem -o StrictHostKeyChecking=no otelcol-config.yaml $EC2_USER@$EC2_IP:~/otelcol-config.yaml
           scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_otelcol.sh $EC2_USER@$EC2_IP:~/install_otelcol.sh
           scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_prometheus.sh $EC2_USER@$EC2_IP:~/install_prometheus.sh
@@ -76,17 +76,17 @@ jobs:
             sudo -E ~/install_prometheus.sh
 
             echo "🧼 Killing old service if running..."
-            sudo systemctl stop yolo-prod.service || true
+            sudo systemctl stop yolo.service || true
 
-            echo "⚙️ Enabling and starting yolo-prod.service"
-            sudo mv ~/yolo-prod.service /etc/systemd/system/yolo-prod.service
+            echo "⚙️ Enabling and starting yolo.service"
+            sudo mv ~/yolo.service /etc/systemd/system/yolo.service
             sudo systemctl daemon-reload
-            sudo systemctl enable yolo-prod.service
-            sudo systemctl restart yolo-prod.service
+            sudo systemctl enable yolo.service
+            sudo systemctl restart yolo.service
 
             echo "⏱ Waiting for service..."
             sleep 3
-            curl -s http://localhost:8080/health || (journalctl -u yolo-prod.service -n 30 --no-pager && exit 1)
+            curl -s http://localhost:8080/health || (journalctl -u yolo.service -n 30 --no-pager && exit 1)
 
             echo "✅ Production YOLO deployment complete."
           EOF
