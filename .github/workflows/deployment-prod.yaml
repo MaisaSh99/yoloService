@@ -1,4 +1,4 @@
-name: Yolo Deploy (Prod)
+name: Deploy Polybot (Prod)
 
 on:
   push:
@@ -6,83 +6,114 @@ on:
       - main
   workflow_dispatch:
 
-env:
-  REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-  REPO_NAME: ${{ github.event.repository.name }}
-
 jobs:
-  Deploy:
+  deploy-polybot-prod:
+    name: Deploy to EC2 (Prod)
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    env:
+      PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+      EC2_IP: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      REPO: ${{ github.repository }}
+      BOT_PROD_TOKEN: ${{ secrets.BOT_PROD_TOKEN }}
+      NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+      NGROK_DOMAIN: "https://minnow-crucial-nicely.ngrok-free.app"
 
     steps:
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Configure SSH (Prod)
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
+      - name: Set up SSH key
         run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          echo "Host ec2
-                HostName $EC2_HOST
-                User $EC2_USER
-                IdentityFile ~/.ssh/id_rsa
-                StrictHostKeyChecking no" > ~/.ssh/config
+          echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
+          chmod 600 key.pem
 
-      - name: Debug SSH
-        run: ssh -v ec2 echo "✅ SSH to Prod works"
-
-      - name: Upload files to EC2 (Prod)
+      - name: Upload files
         run: |
-          scp yolo.service ec2:~/yolo.service
-          scp otelcol-config.yaml ec2:~/otelcol-config.yaml
-          scp .github/scripts/install_otelcol.sh ec2:~/install_otelcol.sh
-          scp .github/scripts/install_prometheus.sh ec2:~/install_prometheus.sh
+          scp -i key.pem -o StrictHostKeyChecking=no polybot-prod.service $EC2_USER@$EC2_IP:~/polybot-prod.service
+          scp -i key.pem -o StrictHostKeyChecking=no otelcol-config.yaml $EC2_USER@$EC2_IP:~/otelcol-config.yaml
+          scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_otelcol.sh $EC2_USER@$EC2_IP:~/install_otelcol.sh
+          scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_prometheus.sh $EC2_USER@$EC2_IP:~/install_prometheus.sh
 
-      - name: SSH Deploy Script (Prod)
+      - name: SSH and deploy
         run: |
-          ssh ec2 << 'EOF'
-            echo "✅ Installing dependencies..."
+          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << 'EOF'
+            set -e
+
+            echo "✅ Installing required packages..."
             sudo apt update
-            sudo apt install -y git python3 python3-pip python3-venv wget tar
+            sudo apt install -y git python3 python3-pip python3-venv curl unzip
 
-            echo "📁 Setting up repo..."
+            echo "📥 Installing ngrok if not present..."
+            if ! command -v ngrok &> /dev/null; then
+              curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+              echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+              sudo apt update && sudo apt install -y ngrok
+            fi
+
+            echo "🔐 Authenticating ngrok..."
+            ngrok config add-authtoken $NGROK_AUTH_TOKEN
+
+            echo "📁 Cloning or updating repo..."
             cd /home/ubuntu
-            if [ -d "yoloServiceNEW" ]; then
-              cd yoloServiceNEW
-              git reset --hard
-              git checkout main
-              git pull origin main
+            if [ -d "PolybotServicePython" ]; then
+              cd PolybotServicePython
+              git fetch origin main
+              sudo rm -rf photos/
+              git reset --hard origin/main
+              git clean -fd
             else
-              git clone ${REPO_URL} yoloServiceNEW
-              cd yoloServiceNEW
+              git clone https://github.com/${REPO}.git PolybotServicePython
+              cd PolybotServicePython
             fi
 
-            echo "📦 Setting up Python environment..."
-            if [ ! -d "venv" ]; then
-              python3 -m venv venv
+            echo "📦 Setting up Python venv..."
+            if [ -d "venv" ]; then
+              echo "🧹 Removing old venv..."
+              rm -rf venv
             fi
+            python3 -m venv venv
             source venv/bin/activate
-            export S3_BUCKET_NAME="maisa-polybot-images"
             pip install --upgrade pip
-            pip install -r requirements.txt
-            pip install boto3
+            pip install -r polybot/requirements.txt
 
             echo "📊 Installing OpenTelemetry & Prometheus..."
             chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
             sudo mv ~/otelcol-config.yaml /etc/otelcol/config.yaml
-            sudo ~/install_otelcol.sh
-            sudo ~/install_prometheus.sh
+            export OTELCOL_IP="$EC2_IP"
+            sudo -E ~/install_otelcol.sh
+            sudo -E ~/install_prometheus.sh
 
-            echo "⚙️ Updating YOLO prod service..."
-            sudo mv ~/yolo.service /etc/systemd/system/yolo.service
+            echo "🧼 Killing rogue processes..."
+            sudo pkill -f "polybot.app" || true
+
+            echo "⚙️ Installing and starting systemd service..."
+            sudo mv ~/polybot-prod.service /etc/systemd/system/polybot-prod.service
             sudo systemctl daemon-reload
-            sudo systemctl enable yolo.service
-            sudo systemctl restart yolo.service
+            sudo systemctl restart polybot-prod.service
+            sudo systemctl enable polybot-prod.service
 
-            echo "✅ Prod YOLO + Observability setup complete."
+            echo "🌐 Waiting for ngrok tunnel to become ready..."
+            for i in {1..10}; do
+              if curl --silent --fail "$NGROK_DOMAIN"; then
+                break
+              fi
+              sleep 2
+            done
+
+            if ! curl --silent --fail "$NGROK_DOMAIN"; then
+              echo "❌ Ngrok tunnel is not ready. Aborting deployment."
+              exit 1
+            fi
+
+            echo "🚫 Deleting old Telegram webhook..."
+            curl -X POST https://api.telegram.org/bot$BOT_PROD_TOKEN/deleteWebhook
+
+            echo "📡 Setting new Telegram webhook..."
+            curl -X POST https://api.telegram.org/bot$BOT_PROD_TOKEN/setWebhook \
+              -d "url=$NGROK_DOMAIN"
+
+            echo "✅ Production deployment and webhook setup complete!"
           EOF
