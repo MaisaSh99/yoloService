@@ -35,7 +35,7 @@ jobs:
 
       - name: SSH and deploy
         run: |
-          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << EOF
+          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << 'EOF'
             set -e
 
             echo "✅ Installing dependencies..."
@@ -57,9 +57,7 @@ jobs:
             fi
 
             echo "📦 Setting up Python venv..."
-            if [ -d "venv" ]; then
-              rm -rf venv
-            fi
+            rm -rf venv
             python3 -m venv venv
             source venv/bin/activate
             export S3_BUCKET_NAME="maisa-dev-bucket"
@@ -70,6 +68,7 @@ jobs:
 
             echo "📊 Installing OpenTelemetry & Prometheus..."
             chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
+            sudo mkdir -p /etc/otelcol
             sudo mv ~/otelcol-config.yaml /etc/otelcol/config.yaml
             export OTELCOL_IP="$EC2_IP"
             sudo -E ~/install_otelcol.sh
