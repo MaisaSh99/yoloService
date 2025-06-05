@@ -35,7 +35,7 @@ jobs:
 
       - name: SSH and deploy
         run: |
-          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << 'EOF'
+          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << EOF
             set -e
 
             echo "✅ Installing dependencies..."
@@ -57,7 +57,9 @@ jobs:
             fi
 
             echo "📦 Setting up Python venv..."
-            rm -rf venv
+            if [ -d "venv" ]; then
+              rm -rf venv
+            fi
             python3 -m venv venv
             source venv/bin/activate
             export S3_BUCKET_NAME="maisa-dev-bucket"
@@ -68,13 +70,13 @@ jobs:
 
             echo "📊 Installing OpenTelemetry & Prometheus..."
             chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
-            sudo mkdir -p /etc/otelcol
             sudo mv ~/otelcol-config.yaml /etc/otelcol/config.yaml
             export OTELCOL_IP="$EC2_IP"
             sudo -E ~/install_otelcol.sh
             sudo -E ~/install_prometheus.sh
 
             echo "🧼 Killing old service if running..."
+            sudo fuser -k 8080/tcp || true
             sudo systemctl stop yolo-dev.service || true
 
             echo "⚙️ Enabling and starting yolo-dev.service"
@@ -84,8 +86,14 @@ jobs:
             sudo systemctl restart yolo-dev.service
 
             echo "⏱ Waiting for service..."
-            sleep 3
-            curl -s http://localhost:8080/health || (journalctl -u yolo-dev.service -n 30 --no-pager && exit 1)
+            sleep 10
+            if curl -s http://localhost:8080/health | grep -q "ok"; then
+              echo "✅ Health check passed."
+            else
+              echo "❌ Health check failed. Showing logs:"
+              journalctl -u yolo-dev.service -n 30 --no-pager
+              exit 1
+            fi
 
             echo "✅ Dev YOLO deployment complete."
           EOF
