@@ -1,37 +1,37 @@
 #!/bin/bash
-set -e
 
 echo "📦 Installing Prometheus..."
-cd ~
-wget https://github.com/prometheus/prometheus/releases/latest/download/prometheus-2.51.1.linux-amd64.tar.gz
-tar -xzf prometheus-2.51.1.linux-amd64.tar.gz
-cd prometheus-2.51.1.linux-amd64
 
-cat <<EOF > prometheus.yml
-global:
-  scrape_interval: 15s
+cd /tmp
 
-scrape_configs:
-  - job_name: 'otelcol'
-    static_configs:
-      - targets: ['localhost:8889']
-EOF
+# Hardcoded working version
+PROM_VERSION="2.51.1"
+FILENAME="prometheus-${PROM_VERSION}.linux-amd64.tar.gz"
+FOLDER="prometheus-${PROM_VERSION}.linux-amd64"
 
-echo "🛠️ Creating systemd service..."
-sudo tee /etc/systemd/system/prometheus.service > /dev/null <<EOF
+wget https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/${FILENAME}
+tar -xzf ${FILENAME}
+sudo mv ${FOLDER} /opt/prometheus
+
+# Create systemd service
+sudo tee /etc/systemd/system/prometheus.service > /dev/null <<EOL
 [Unit]
-Description=Prometheus
-After=network.target
+Description=Prometheus Monitoring
+Wants=network-online.target
+After=network-online.target
 
 [Service]
-ExecStart=/home/ubuntu/prometheus-2.51.1.linux-amd64/prometheus --config.file=/home/ubuntu/prometheus-2.51.1.linux-amd64/prometheus.yml
+ExecStart=/opt/prometheus/prometheus \
+  --config.file=/opt/prometheus/prometheus.yml \
+  --storage.tsdb.path=/opt/prometheus/data \
+  --web.listen-address=:9090
 Restart=always
-User=ubuntu
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOL
 
+# Start Prometheus
 sudo systemctl daemon-reload
 sudo systemctl enable prometheus
 sudo systemctl restart prometheus

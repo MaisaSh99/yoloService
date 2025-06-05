@@ -8,6 +8,7 @@ receivers:
       filesystem:
       load:
       network:
+      paging:
       processes:
 
 exporters:
