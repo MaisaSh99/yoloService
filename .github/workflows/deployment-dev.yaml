@@ -1,4 +1,4 @@
-name: Yolo Deploy (Dev)
+name: Deploy YOLO (Dev)
 
 on:
   push:
@@ -6,70 +6,87 @@ on:
       - dev
   workflow_dispatch:
 
-env:
-  REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-  REPO_NAME: ${{ github.event.repository.name }}
-
 jobs:
-  Deploy:
+  deploy-yolo-dev:
+    name: Deploy to EC2 (Dev)
     runs-on: ubuntu-latest
 
+    env:
+      PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+      EC2_IP: ${{ secrets.EC2_DEV_HOST }}
+      EC2_USER: ${{ secrets.EC2_DEV_USER }}
+      REPO: ${{ github.repository }}
+
     steps:
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Configure SSH (Dev)
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_DEV_HOST: ${{ secrets.EC2_DEV_HOST }}
-          EC2_DEV_USER: ${{ secrets.EC2_DEV_USER }}
+      - name: Set up SSH key
         run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          echo "Host ec2-dev
-                HostName $EC2_DEV_HOST
-                User $EC2_DEV_USER
-                IdentityFile ~/.ssh/id_rsa
-                StrictHostKeyChecking no" > ~/.ssh/config
+          echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
+          chmod 600 key.pem
 
-      - name: Upload files to EC2 (Dev)
+      - name: Upload service and observability scripts
         run: |
-          scp yolo-dev.service ec2-dev:~/yolo-dev.service
+          scp -i key.pem -o StrictHostKeyChecking=no yolo-dev.service $EC2_USER@$EC2_IP:~/yolo-dev.service
+          scp -i key.pem -o StrictHostKeyChecking=no otelcol-config.yaml $EC2_USER@$EC2_IP:~/otelcol-config.yaml
+          scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_otelcol.sh $EC2_USER@$EC2_IP:~/install_otelcol.sh
+          scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_prometheus.sh $EC2_USER@$EC2_IP:~/install_prometheus.sh
 
-      - name: SSH Deploy Script (Dev)
+      - name: SSH and deploy
         run: |
-          ssh ec2-dev << 'EOF'
+          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << EOF
+            set -e
+
             echo "✅ Installing dependencies..."
             sudo apt update
-            sudo apt install -y git python3 python3-pip python3-venv
+            sudo apt install -y git python3 python3-pip python3-venv wget curl unzip
 
-            echo "📁 Setting up repo..."
+            echo "📁 Cloning or updating repo..."
             cd /home/ubuntu
             if [ -d "yoloService" ]; then
               cd yoloService
+              git reset --hard
+              git clean -fd
+              git checkout dev
               git pull origin dev
             else
-              git clone ${REPO_URL} yoloService
+              git clone https://github.com/${REPO}.git yoloService
               cd yoloService
               git checkout dev
             fi
 
-            echo "📦 Setting up Python environment..."
-            if [ ! -d "venv" ]; then
-              python3 -m venv venv
+            echo "📦 Setting up Python venv..."
+            if [ -d "venv" ]; then
+              rm -rf venv
             fi
+            python3 -m venv venv
             source venv/bin/activate
             export S3_BUCKET_NAME="maisa-dev-bucket"
             pip install --upgrade pip
+            pip install -r torch-requirements.txt
             pip install -r requirements.txt
-            pip install boto3
+            pip install opencv-python numpy boto3
 
-            echo "⚙️ Updating systemd service..."
+            echo "📊 Installing OpenTelemetry & Prometheus..."
+            chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
+            sudo mv ~/otelcol-config.yaml /etc/otelcol/config.yaml
+            export OTELCOL_IP="$EC2_IP"
+            sudo -E ~/install_otelcol.sh
+            sudo -E ~/install_prometheus.sh
+
+            echo "🧼 Killing old service if running..."
+            sudo systemctl stop yolo-dev.service || true
+
+            echo "⚙️ Enabling and starting yolo-dev.service"
             sudo mv ~/yolo-dev.service /etc/systemd/system/yolo-dev.service
             sudo systemctl daemon-reload
-            sudo systemctl restart yolo-dev.service
             sudo systemctl enable yolo-dev.service
+            sudo systemctl restart yolo-dev.service
 
-            echo "✅ YOLO dev deployed!"
+            echo "⏱ Waiting for service..."
+            sleep 3
+            curl -s http://localhost:8080/health || (journalctl -u yolo-dev.service -n 30 --no-pager && exit 1)
+
+            echo "✅ Dev YOLO deployment complete."
           EOF
