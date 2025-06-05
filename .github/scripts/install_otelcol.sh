@@ -1,26 +1,35 @@
 #!/bin/bash
-set -e
 
 echo "📦 Installing OpenTelemetry Collector..."
-wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/latest/download/otelcol-linux-amd64
-chmod +x otelcol-linux-amd64
-sudo mv otelcol-linux-amd64 /usr/local/bin/otelcol
 
-echo "🛠️ Creating systemd service..."
-sudo tee /etc/systemd/system/otelcol.service > /dev/null <<EOF
+cd /tmp
+
+# Download the latest tarball release
+wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/latest/download/otelcol-linux-amd64.tar.gz
+tar -xzf otelcol-linux-amd64.tar.gz
+sudo mv otelcol /usr/local/bin/otelcol
+
+# Create config directory
+sudo mkdir -p /etc/otelcol
+
+# Copy config from repo (make sure otelcol-config.yaml exists in project root)
+sudo cp ~/yoloService/otelcol-config.yaml /etc/otelcol/config.yaml
+
+# Create systemd service
+sudo tee /etc/systemd/system/otelcol.service > /dev/null <<EOL
 [Unit]
 Description=OpenTelemetry Collector
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/otelcol --config /home/ubuntu/otelcol-config.yaml
+ExecStart=/usr/local/bin/otelcol --config /etc/otelcol/config.yaml
 Restart=always
-User=ubuntu
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOL
 
+# Start otelcol
 sudo systemctl daemon-reload
 sudo systemctl enable otelcol
 sudo systemctl restart otelcol
