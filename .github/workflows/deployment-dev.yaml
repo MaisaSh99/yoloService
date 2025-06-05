@@ -1,4 +1,4 @@
-name: Deploy Polybot (Dev)
+name: Deploy Yolo (Dev)
 
 on:
   push:
@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy-polybot-dev:
-    name: Deploy to EC2 (Dev)
+  deploy-yolo-dev:
+    name: Deploy YOLO Dev to EC2
     runs-on: ubuntu-latest
 
     env:
@@ -16,67 +16,52 @@ jobs:
       EC2_IP: ${{ secrets.EC2_DEV_HOST }}
       EC2_USER: ${{ secrets.EC2_DEV_USER }}
       REPO: ${{ github.repository }}
-      BOT_DEV_TOKEN: ${{ secrets.BOT_DEV_TOKEN }}
-      NGROK_DEV_AUTH_TOKEN: ${{ secrets.NGROK_DEV_AUTH_TOKEN }}
-      NGROK_DOMAIN: "https://loosely-coherent-lacewing.ngrok-free.app"
-      DEPLOY_ENV: dev
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up SSH key
+      - name: Setup SSH key
         run: |
           echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
           chmod 600 key.pem
 
-      - name: Upload files
+      - name: Upload deployment files to Dev
         run: |
-          scp -i key.pem -o StrictHostKeyChecking=no polybot-dev.service $EC2_USER@$EC2_IP:~/polybot-dev.service
+          scp -i key.pem -o StrictHostKeyChecking=no yolo-dev.service $EC2_USER@$EC2_IP:~/yolo-dev.service
           scp -i key.pem -o StrictHostKeyChecking=no otelcol-config.yaml $EC2_USER@$EC2_IP:~/otelcol-config.yaml
           scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_otelcol.sh $EC2_USER@$EC2_IP:~/install_otelcol.sh
           scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_prometheus.sh $EC2_USER@$EC2_IP:~/install_prometheus.sh
 
-      - name: SSH and deploy
+      - name: SSH and deploy on Dev
         run: |
           ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << EOF
             set -e
 
-            echo "✅ Installing required packages..."
+            echo "✅ Installing dependencies..."
             sudo apt update
-            sudo apt install -y git python3 python3-pip python3-venv curl unzip
-
-            echo "📥 Installing ngrok if not present..."
-            if ! command -v ngrok &> /dev/null; then
-              curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-              echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
-              sudo apt update && sudo apt install -y ngrok
-            fi
-
-            echo "🔐 Authenticating ngrok..."
-            ngrok config add-authtoken $NGROK_DEV_AUTH_TOKEN
+            sudo apt install -y git python3 python3-pip python3-venv wget curl tar unzip
 
             echo "📁 Cloning or updating repo..."
             cd /home/ubuntu
-            if [ -d "PolybotServicePython" ]; then
-              cd PolybotServicePython
-              git fetch origin dev
-              git reset --hard origin/dev
-              git clean -fd
+            if [ -d "yoloService" ]; then
+              cd yoloService
+              git reset --hard
+              git checkout dev
+              git pull origin dev
             else
-              git clone https://github.com/${REPO}.git PolybotServicePython
-              cd PolybotServicePython
+              git clone https://github.com/${REPO}.git yoloService
+              cd yoloService
+              git checkout dev
             fi
 
-            echo "📦 Setting up Python venv..."
-            if [ -d "venv" ]; then
-              echo "🧹 Removing old venv..."
-              rm -rf venv
-            fi
+            echo "🐍 Setting up virtual environment..."
             python3 -m venv venv
             source venv/bin/activate
+            export S3_BUCKET_NAME="maisa-dev-bucket"
             pip install --upgrade pip
-            pip install -r polybot/requirements.txt
+            pip install -r requirements.txt
+            pip install boto3
 
             echo "📊 Installing OpenTelemetry & Prometheus..."
             chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
@@ -85,34 +70,11 @@ jobs:
             sudo -E ~/install_otelcol.sh
             sudo -E ~/install_prometheus.sh
 
-            echo "🧼 Killing rogue processes..."
-            sudo pkill -f "polybot.app" || true
-
-            echo "⚙️ Installing and starting systemd service..."
-            sudo mv ~/polybot-dev.service /etc/systemd/system/polybot-dev.service
+            echo "🛠️ Setting up YOLO dev systemd service..."
+            sudo mv ~/yolo-dev.service /etc/systemd/system/yolo-dev.service
             sudo systemctl daemon-reload
-            sudo systemctl restart polybot-dev.service
-            sudo systemctl enable polybot-dev.service
+            sudo systemctl enable yolo-dev.service
+            sudo systemctl restart yolo-dev.service
 
-            echo "🌐 Waiting for ngrok tunnel to become ready..."
-            for i in {1..10}; do
-              if curl --silent --fail "$NGROK_DOMAIN"; then
-                break
-              fi
-              sleep 2
-            done
-
-            if ! curl --silent --fail "$NGROK_DOMAIN"; then
-              echo "❌ Ngrok tunnel is not ready. Aborting deployment."
-              exit 1
-            fi
-
-            echo "🚫 Deleting old Telegram webhook..."
-            curl -X POST https://api.telegram.org/bot$BOT_DEV_TOKEN/deleteWebhook
-
-            echo "📡 Setting new Telegram webhook..."
-            curl -X POST https://api.telegram.org/bot$BOT_DEV_TOKEN/setWebhook \
-              -d "url=$NGROK_DOMAIN"
-
-            echo "✅ Development deployment and webhook setup complete!"
+            echo "✅ Dev YOLO deployment complete."
           EOF
