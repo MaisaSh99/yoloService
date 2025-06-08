@@ -31,10 +31,16 @@ scrape_configs:
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
-  - job_name: 'otel-collector'
+
+  - job_name: 'otel-collector-polybot'
     static_configs:
-      - targets: ['${OTELCOL_IP}:8889']
+      - targets: ['10.0.0.135:8889']
+
+  - job_name: 'otel-collector-yolo'
+    static_configs:
+      - targets: ['10.0.1.143:8889']
 EOL
+
 
 # Create Prometheus systemd service
 sudo tee /etc/systemd/system/prometheus.service > /dev/null <<EOL
