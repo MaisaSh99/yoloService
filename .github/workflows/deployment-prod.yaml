@@ -1,19 +1,90 @@
-# ...top part unchanged...
+name: Deploy YOLO (Prod)
 
-            echo "📦 Setting up Python .venv..."
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy-yolo-prod:
+    name: Deploy to EC2 (Prod)
+    runs-on: ubuntu-latest
+
+    env:
+      PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+      EC2_IP: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up SSH key
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
+          chmod 600 key.pem
+
+      - name: Upload service and observability scripts
+        run: |
+          scp -i key.pem -o StrictHostKeyChecking=no yolo.service $EC2_USER@$EC2_IP:~/yolo.service
+          scp -i key.pem -o StrictHostKeyChecking=no otelcol-config.yaml $EC2_USER@$EC2_IP:~/otelcol-config.yaml
+          scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_otelcol.sh $EC2_USER@$EC2_IP:~/install_otelcol.sh
+          scp -i key.pem -o StrictHostKeyChecking=no .github/scripts/install_prometheus.sh $EC2_USER@$EC2_IP:~/install_prometheus.sh
+
+      - name: SSH and deploy
+        run: |
+          ssh -i key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_IP << EOF
+            set -e
+
+            echo "✅ Installing dependencies..."
+            while sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+              echo "🔒 Waiting for apt lock to be released..."
+              sleep 3
+            done
+
+            sudo apt update
+            sudo apt install -y git python3 python3-pip python3-venv wget curl unzip
+
+            echo "📁 Cloning or updating repo..."
+            cd /home/ubuntu
+            if [ -d "yoloService" ]; then
+              cd yoloService
+              git reset --hard
+              git clean -fd
+              git checkout main
+              git pull origin main
+            else
+              git clone https://github.com/${REPO}.git yoloService
+              cd yoloService
+              git checkout main
+            fi
+
+            echo "📦 Setting up Python venv..."
+            cd /home/ubuntu/yoloService
             if [ -d ".venv" ]; then
               rm -rf .venv
             fi
             python3 -m venv .venv
-            . .venv/bin/activate
-
+            source .venv/bin/activate
             export S3_BUCKET_NAME="maisa-polybot-images"
             pip install --upgrade pip
             pip install -r torch-requirements.txt
             pip install -r requirements.txt
-            pip install opencv-python numpy boto3
 
-            # ...rest unchanged...
+            echo "📊 Installing OpenTelemetry & Prometheus..."
+            chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
+            sudo mv ~/otelcol-config.yaml /etc/otelcol/config.yaml
+            export OTELCOL_IP="$EC2_IP"
+            sudo -E ~/install_otelcol.sh
+            export OTELCOL_IP="10.0.1.143"
+            sudo -E ~/install_prometheus.sh
+
+            echo "🧹 Cleaning up port 8080 processes..."
+            sudo lsof -t -i:8080 | xargs -r sudo kill -9 || true
+            sudo systemctl stop yolo.service || true
+            sleep 2  ### wait to ensure port is released
 
             echo "⚙️ Enabling and starting yolo.service"
             sudo mv ~/yolo.service /etc/systemd/system/yolo.service
@@ -23,7 +94,7 @@
 
             echo "⏱ Waiting for service health check..."
             for i in {1..10}; do
-              STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
+              STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health || echo "000")
               if [ "\$STATUS" == "200" ]; then
                 echo "✅ Health check passed."
                 break
@@ -32,7 +103,7 @@
               sleep 5
             done
 
-            STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
+            STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health || echo "000")
             if [ "\$STATUS" != "200" ]; then
               echo "❌ Health check failed. Showing logs:"
               journalctl -u yolo.service -n 30 --no-pager
@@ -40,3 +111,4 @@
             fi
 
             echo "✅ Production YOLO deployment complete."
+          EOF
