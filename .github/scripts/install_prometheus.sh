@@ -4,8 +4,12 @@ set -e
 PROM_VERSION="2.51.1"
 FOLDER="prometheus-${PROM_VERSION}.linux-amd64"
 FILENAME="${FOLDER}.tar.gz"
-
 OTELCOL_IP=${OTELCOL_IP:-"127.0.0.1"}  # fallback to localhost if not passed
+
+if [ -f "/usr/local/bin/prometheus" ]; then
+  echo "🔁 Prometheus already installed at /usr/local/bin/prometheus — skipping installation."
+  exit 0
+fi
 
 echo "📦 Installing Prometheus v${PROM_VERSION}..."
 
@@ -31,9 +35,14 @@ scrape_configs:
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
-  - job_name: 'otel-collector'
+
+  - job_name: 'otel-collector-polybot'
     static_configs:
-      - targets: ['${OTELCOL_IP}:8889']
+      - targets: ['10.0.0.135:8889']
+
+  - job_name: 'otel-collector-yolo'
+    static_configs:
+      - targets: ['10.0.1.143:8889']
 EOL
 
 # Create Prometheus systemd service
