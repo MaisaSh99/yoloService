@@ -1,21 +1,22 @@
 #!/bin/bash
+set -e
 
-echo "📦 Installing OpenTelemetry Collector..."
+VERSION="0.96.0"
+FILENAME="otelcol_${VERSION}_linux_amd64.tar.gz"
+URL="https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${VERSION}/${FILENAME}"
+
+echo "📦 Installing OpenTelemetry Collector v${VERSION}..."
 
 cd /tmp
-
-# Download the latest tarball release
-wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/latest/download/otelcol-linux-amd64.tar.gz
-tar -xzf otelcol-linux-amd64.tar.gz
+wget "$URL"
+tar -xzf "$FILENAME"
 sudo mv otelcol /usr/local/bin/otelcol
 
-# Create config directory
+# Setup config directory
 sudo mkdir -p /etc/otelcol
-
-# Copy config from home directory (uploaded during deployment)
 sudo cp ~/otelcol-config.yaml /etc/otelcol/config.yaml
 
-# Create systemd service
+# Systemd service
 sudo tee /etc/systemd/system/otelcol.service > /dev/null <<EOL
 [Unit]
 Description=OpenTelemetry Collector
@@ -29,7 +30,6 @@ Restart=always
 WantedBy=multi-user.target
 EOL
 
-# Start otelcol
 sudo systemctl daemon-reload
 sudo systemctl enable otelcol
 sudo systemctl restart otelcol
