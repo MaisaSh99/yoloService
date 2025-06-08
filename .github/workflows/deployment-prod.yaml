@@ -91,15 +91,21 @@ jobs:
             sudo systemctl enable yolo.service
             sudo systemctl restart yolo.service
 
-            echo "⏱ Waiting for service..."
-            sleep 10
-            if curl -s http://localhost:8080/health | grep -q "ok"; then
-              echo "✅ Health check passed."
-            else
+            echo "⏱ Waiting for service health check..."
+            for i in {1..5}; do
+              if curl -s http://localhost:8080/health | grep -q "ok"; then
+                echo "✅ Health check passed."
+                break
+              fi
+              echo "⌛ Health check attempt \$i failed, retrying..."
+              sleep 5
+            done
+
+            if ! curl -s http://localhost:8080/health | grep -q "ok"; then
               echo "❌ Health check failed. Showing logs:"
-              journalctl -u yolo.service -n 30 --no-pager
+              journalctl -u yolo-dev.service -n 30 --no-pager
               exit 1
             fi
 
-            echo "✅ Production YOLO deployment complete."
+            echo "✅ Dev YOLO deployment complete."
           EOF
