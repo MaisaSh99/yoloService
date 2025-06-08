@@ -56,18 +56,17 @@ jobs:
               git checkout dev
             fi
 
-            echo "📦 Setting up Python .venv..."
+            echo "📦 Setting up Python venv..."
+            cd /home/ubuntu/yoloService
             if [ -d ".venv" ]; then
               rm -rf .venv
             fi
             python3 -m venv .venv
-            . .venv/bin/activate
-
+            source .venv/bin/activate
             export S3_BUCKET_NAME="maisa-dev-bucket"
             pip install --upgrade pip
             pip install -r torch-requirements.txt
             pip install -r requirements.txt
-            pip install opencv-python numpy boto3
 
             echo "📊 Installing OpenTelemetry & Prometheus..."
             chmod +x ~/install_otelcol.sh ~/install_prometheus.sh
@@ -80,6 +79,7 @@ jobs:
             echo "🧹 Cleaning up port 8080 processes..."
             sudo lsof -t -i:8080 | xargs -r sudo kill -9 || true
             sudo systemctl stop yolo-dev.service || true
+            sleep 2  ### 🔧 FIX: wait to ensure port is released
 
             echo "⚙️ Enabling and starting yolo-dev.service"
             sudo mv ~/yolo-dev.service /etc/systemd/system/yolo-dev.service
@@ -89,7 +89,7 @@ jobs:
 
             echo "⏱ Waiting for service health check..."
             for i in {1..10}; do
-              STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
+              STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health || echo "000")
               if [ "\$STATUS" == "200" ]; then
                 echo "✅ Health check passed."
                 break
@@ -98,7 +98,7 @@ jobs:
               sleep 5
             done
             
-            STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
+            STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health || echo "000")
             if [ "\$STATUS" != "200" ]; then
               echo "❌ Health check failed. Showing logs:"
               journalctl -u yolo-dev.service -n 30 --no-pager
