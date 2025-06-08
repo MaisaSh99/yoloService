@@ -81,8 +81,8 @@ jobs:
             export OTELCOL_IP="10.0.1.143"
             sudo -E ~/install_prometheus.sh
 
-            echo "🧼 Killing old service if running..."
-            sudo fuser -k 8080/tcp || true
+            echo "🧹 Cleaning up port 8080 processes..."
+            sudo lsof -t -i:8080 | xargs -r sudo kill -9 || true
             sudo systemctl stop yolo.service || true
 
             echo "⚙️ Enabling and starting yolo.service"
