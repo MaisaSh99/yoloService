@@ -103,9 +103,9 @@ jobs:
 
             if ! curl -s http://localhost:8080/health | grep -q "ok"; then
               echo "❌ Health check failed. Showing logs:"
-              journalctl -u yolo-dev.service -n 30 --no-pager
+              journalctl -u yolo.service -n 30 --no-pager
               exit 1
             fi
 
-            echo "✅ Dev YOLO deployment complete."
+            echo "✅ Production YOLO deployment complete."
           EOF
