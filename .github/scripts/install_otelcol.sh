@@ -14,7 +14,6 @@ sudo mv otelcol /usr/local/bin/otelcol
 
 # Setup config directory
 sudo mkdir -p /etc/otelcol
-sudo cp ~/otelcol-config.yaml /etc/otelcol/config.yaml
 
 # Systemd service
 sudo tee /etc/systemd/system/otelcol.service > /dev/null <<EOL
