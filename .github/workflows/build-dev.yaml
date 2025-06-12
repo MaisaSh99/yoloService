@@ -11,25 +11,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Debug secrets
-        run: |
-          echo "🔍 Checking DockerHub username (length): ${#DOCKER_USERNAME}"
-          if [ -z "$DOCKER_USERNAME" ]; then
-            echo "❌ DOCKERHUB_USERNAME secret is empty or not set!"
-            exit 1
-          fi
-          echo "✅ DockerHub username is set"
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      
       - name: Log in to DockerHub
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
       
       - name: Build and push Docker image with curl
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          RUN_NUMBER: ${{ github.run_number }}
         run: |
+          # Clean the username by removing any whitespace/newlines
+          DOCKER_USERNAME=$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr -d '[:space:]')
+          RUN_NUMBER="${{ github.run_number }}"
+          
           if [ -z "$DOCKER_USERNAME" ]; then
             echo "❌ DOCKERHUB_USERNAME is not set"
             exit 1
@@ -38,15 +28,14 @@ jobs:
           BASE_IMAGE="${DOCKER_USERNAME}/yolo-dev-base:${RUN_NUMBER}"
           IMAGE_NAME="${DOCKER_USERNAME}/yolo-dev:${RUN_NUMBER}"
           
-          echo "🔧 BASE_IMAGE: $BASE_IMAGE"
-          echo "🔧 IMAGE_NAME: $IMAGE_NAME"
-      
-          echo "🔧 Building base image (original)"
+          echo "🔧 Building base image: $BASE_IMAGE"
           docker build -t "$BASE_IMAGE" .
       
           echo "🔧 Creating patched Dockerfile with curl"
-          echo "FROM $BASE_IMAGE" > Dockerfile.patched
-          echo "RUN apt-get update && apt-get install -y curl" >> Dockerfile.patched
+          cat > Dockerfile.patched << EOL
+FROM $BASE_IMAGE
+RUN apt-get update && apt-get install -y curl
+EOL
       
           echo "🔧 Building final image with curl: $IMAGE_NAME"
           docker build -t "$IMAGE_NAME" -f Dockerfile.patched .
