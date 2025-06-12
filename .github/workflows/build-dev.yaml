@@ -10,38 +10,65 @@ jobs:
       image: ${{ steps.save-image.outputs.image }}
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Debug secrets
+        run: |
+          echo "🔍 Checking DockerHub username (length): ${#DOCKER_USERNAME}"
+          if [ -z "$DOCKER_USERNAME" ]; then
+            echo "❌ DOCKERHUB_USERNAME secret is empty or not set!"
+            exit 1
+          fi
+          echo "✅ DockerHub username is set"
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      
       - name: Log in to DockerHub
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+      
       - name: Build and push Docker image with curl
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/yolo-dev-base:${{ github.run_number }}
-          IMAGE_NAME=${{ secrets.DOCKERHUB_USERNAME }}/yolo-dev:${{ github.run_number }}
+          if [ -z "$DOCKER_USERNAME" ]; then
+            echo "❌ DOCKERHUB_USERNAME is not set"
+            exit 1
+          fi
+          
+          BASE_IMAGE="${DOCKER_USERNAME}/yolo-dev-base:${RUN_NUMBER}"
+          IMAGE_NAME="${DOCKER_USERNAME}/yolo-dev:${RUN_NUMBER}"
+          
+          echo "🔧 BASE_IMAGE: $BASE_IMAGE"
+          echo "🔧 IMAGE_NAME: $IMAGE_NAME"
       
           echo "🔧 Building base image (original)"
-          docker build -t $BASE_IMAGE .
+          docker build -t "$BASE_IMAGE" .
       
           echo "🔧 Creating patched Dockerfile with curl"
           echo "FROM $BASE_IMAGE" > Dockerfile.patched
           echo "RUN apt-get update && apt-get install -y curl" >> Dockerfile.patched
       
           echo "🔧 Building final image with curl: $IMAGE_NAME"
-          docker build -t $IMAGE_NAME -f Dockerfile.patched .
+          docker build -t "$IMAGE_NAME" -f Dockerfile.patched .
       
           echo "📤 Pushing final image to DockerHub"
-          docker push $IMAGE_NAME
+          docker push "$IMAGE_NAME"
       
           echo "$IMAGE_NAME" > image_name.txt
+      
       - name: Save image name as output
         id: save-image
         run: |
           IMAGE_NAME=$(cat image_name.txt)
           echo "image=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "✅ Saved image output: $IMAGE_NAME"
+      
       - name: Upload image name as artifact
         uses: actions/upload-artifact@v4
         with:
           name: image-name
           path: image_name.txt
+          
   deploy:
     needs: build
     uses: ./.github/workflows/deploy-dev.yaml
