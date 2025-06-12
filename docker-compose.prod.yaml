@@ -1,0 +1,31 @@
+services:
+  yolo:
+    image: ${IMG_NAME}
+    container_name: yolo-prod
+    ports:
+      - "8080:8080"
+    environment:
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector-yolo-prod
+    ports:
+      - "8889:8889"
+    volumes:
+      - ./otelcol-config.yaml:/etc/otelcol/config.yaml
+      - /proc:/hostfs/proc:ro
+      - /sys:/hostfs/sys:ro
+    environment:
+      - HOST_PROC=/hostfs/proc
+      - HOST_SYS=/hostfs/sys
+    network_mode: host
+    restart: unless-stopped
