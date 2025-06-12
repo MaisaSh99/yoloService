@@ -1,8 +1,10 @@
 name: YOLO Build Dev
+
 on:
   push:
     branches:
       - dev
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,7 +18,6 @@ jobs:
       
       - name: Build and push Docker image with curl
         run: |
-          # Clean the username by removing any whitespace/newlines
           DOCKER_USERNAME=$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr -d '[:space:]')
           RUN_NUMBER="${{ github.run_number }}"
           
@@ -32,10 +33,10 @@ jobs:
           docker build -t "$BASE_IMAGE" .
       
           echo "🔧 Creating patched Dockerfile with curl"
-          cat > Dockerfile.patched << EOL
-FROM $BASE_IMAGE
+          cat > Dockerfile.patched << 'DOCKERFILE'
+FROM ${BASE_IMAGE}
 RUN apt-get update && apt-get install -y curl
-EOL
+DOCKERFILE
       
           echo "🔧 Building final image with curl: $IMAGE_NAME"
           docker build -t "$IMAGE_NAME" -f Dockerfile.patched .
