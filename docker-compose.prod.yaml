@@ -1,31 +1,44 @@
-version: "3.8"
-
 services:
   yolo:
     image: ${IMG_NAME}
     container_name: yolo-prod
+    restart: always
     ports:
       - "8080:8080"
-    environment:
-      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
-      - PYTHONUNBUFFERED=1
-    restart: unless-stopped
+    env_file: .env
+    networks:
+      - observability
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 20s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: otel-collector-yolo-prod
-    network_mode: host
-    environment:
-      - HOST_PROC=/hostfs/proc
-      - HOST_SYS=/hostfs/sys
+    restart: always
+    command: ["--config", "/etc/otelcol/config.yaml"]
+    ports:
+      - "8889:8889"
     volumes:
       - ./otelcol-config.yaml:/etc/otelcol/config.yaml
-      - /proc:/hostfs/proc:ro
-      - /sys:/hostfs/sys:ro
-    restart: unless-stopped
+      - /proc:/host_proc:ro
+      - /sys:/host_sys:ro
+    environment:
+      - HOST_PROC=/host_proc
+      - HOST_SYS=/host_sys
+    networks:
+      - observability
+    depends_on:
+      yolo:
+        condition: service_healthy
+
+networks:
+  observability:
