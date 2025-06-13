@@ -18,6 +18,7 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: otel-collector-yolo-prod
+    command: ["--config=/etc/otelcol/config.yaml"]
     ports:
       - "8889:8889"
     volumes:
