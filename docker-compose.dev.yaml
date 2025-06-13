@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   yolo:
     image: ${IMG_NAME}
@@ -18,15 +20,12 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: otel-collector-yolo-dev
-    command: ["--config=/etc/otelcol/config.yaml"]
-    ports:
-      - "8889:8889"
+    network_mode: host
+    environment:
+      - HOST_PROC=/hostfs/proc
+      - HOST_SYS=/hostfs/sys
     volumes:
       - ./otelcol-config.yaml:/etc/otelcol/config.yaml
       - /proc:/hostfs/proc:ro
       - /sys:/hostfs/sys:ro
-    environment:
-      - HOST_PROC=/hostfs/proc
-      - HOST_SYS=/hostfs/sys
-    network_mode: host
     restart: unless-stopped
