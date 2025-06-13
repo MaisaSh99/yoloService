@@ -16,7 +16,7 @@ jobs:
       - name: Log in to DockerHub
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
       
-      - name: Build and push Docker image with curl
+      - name: Build and push Docker image
         run: |
           DOCKER_USERNAME=$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr -d '[:space:]')
           RUN_NUMBER="${{ github.run_number }}"
@@ -26,22 +26,12 @@ jobs:
             exit 1
           fi
           
-          BASE_IMAGE="${DOCKER_USERNAME}/yolo-dev-base:${RUN_NUMBER}"
           IMAGE_NAME="${DOCKER_USERNAME}/yolo-dev:${RUN_NUMBER}"
           
-          echo "🔧 Building base image: $BASE_IMAGE"
-          docker build -t "$BASE_IMAGE" .
+          echo "🔧 Building Docker image: $IMAGE_NAME"
+          docker build -t "$IMAGE_NAME" .
       
-          echo "🔧 Creating patched Dockerfile with curl"
-          cat > Dockerfile.patched << 'DOCKERFILE'
-FROM ${BASE_IMAGE}
-RUN apt-get update && apt-get install -y curl
-DOCKERFILE
-      
-          echo "🔧 Building final image with curl: $IMAGE_NAME"
-          docker build -t "$IMAGE_NAME" -f Dockerfile.patched .
-      
-          echo "📤 Pushing final image to DockerHub"
+          echo "📤 Pushing image to DockerHub"
           docker push "$IMAGE_NAME"
       
           echo "$IMAGE_NAME" > image_name.txt
