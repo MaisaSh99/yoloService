@@ -1,0 +1,122 @@
+name: YOLO Deploy Dev
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        required: true
+        type: string
+
+    secrets:
+      EC2_SSH_KEY:
+        required: true
+      EC2_DEV_HOST:
+        required: true
+      EC2_DEV_USER:
+        required: true
+      S3_BUCKET_NAME_DEV:
+        required: true
+
+  workflow_dispatch:
+    inputs:
+      image:
+        required: true
+        type: string
+        description: 'Docker image name to deploy'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download image name artifact (fallback)
+        uses: actions/download-artifact@v4
+        with:
+          name: image-name
+          path: ./
+        continue-on-error: true
+
+      - name: Setup SSH key
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
+          chmod 600 key.pem
+
+      - name: Determine image name
+        id: get-image
+        run: |
+          if [ -n "${{ inputs.image }}" ]; then
+            IMAGE_NAME="${{ inputs.image }}"
+            echo "✅ Using input image: $IMAGE_NAME"
+          elif [ -f "image_name.txt" ]; then
+            IMAGE_NAME=$(cat image_name.txt)
+            echo "✅ Using artifact image: $IMAGE_NAME"
+          else
+            echo "❌ No image name found!"
+            exit 1
+          fi
+          
+          echo "image=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "🚀 Final image name: $IMAGE_NAME"
+
+      - name: Create .env file
+        run: |
+          IMAGE_NAME="${{ steps.get-image.outputs.image }}"
+          
+          echo "IMG_NAME=$IMAGE_NAME" > .env
+          echo "S3_BUCKET_NAME=${{ secrets.S3_BUCKET_NAME_DEV }}" >> .env
+          
+          echo "📝 Contents of .env file:"
+          cat .env
+
+      - name: SSH and deploy using Docker Compose
+        run: |
+          scp -i key.pem -o StrictHostKeyChecking=no .env ${{ secrets.EC2_DEV_USER }}@${{ secrets.EC2_DEV_HOST }}:/home/ubuntu/yoloService/.env
+
+          ssh -i key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_DEV_USER }}@${{ secrets.EC2_DEV_HOST }} << 'EOF'
+            echo "📁 Cloning or updating repo"
+            if [ -d "yoloService" ]; then
+              cd yoloService
+              git checkout dev
+              git pull origin dev
+            else
+              git clone --branch dev https://github.com/${{ github.repository }} yoloService
+              cd yoloService
+            fi
+          
+            echo "📝 Checking .env file contents on server:"
+            cat .env
+                    
+            echo "[+] Checking for Docker"
+            if ! command -v docker &> /dev/null; then
+              echo "📦 Installing Docker..."
+              curl -fsSL https://get.docker.com -o get-docker.sh
+              sh get-docker.sh
+              sudo usermod -aG docker $USER
+              newgrp docker
+            else
+              echo "✅ Docker already installed"
+            fi
+
+            echo "🐳 Running Docker Compose for Dev"
+            docker compose -f docker-compose.dev.yaml pull
+            docker compose -f docker-compose.dev.yaml up -d --remove-orphans
+
+            echo "🔍 Verifying YOLO health"
+            if curl -s http://localhost:8080/health | grep -q 'ok'; then
+              echo "✅ YOLO health check passed"
+            else
+              echo "⚠️ YOLO health check failed"
+              docker logs yolo-dev 2>/dev/null || echo "No yolo-dev container found"
+            fi
+
+            echo "🔍 Verifying OpenTelemetry metrics endpoint"
+            if curl -s http://localhost:8889/metrics | grep -q 'system_cpu_time'; then
+              echo "✅ OpenTelemetry metrics are exposed"
+            else
+              echo "⚠️ Metrics not available"
+              docker logs otel-collector-yolo-dev 2>/dev/null || echo "No otel-collector-yolo-dev container found"
+            fi
+          EOF
