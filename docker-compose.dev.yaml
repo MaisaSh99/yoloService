@@ -6,6 +6,11 @@ services:
     ports:
       - "8080:8080"
     env_file: .env
+    environment:
+      - STORAGE_TYPE=${STORAGE_TYPE:-sqlite}
+      - DYNAMODB_TABLE=${DYNAMODB_TABLE:-YoloPredictions-Dev}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-eu-west-2}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
     networks:
       - observability
     healthcheck:

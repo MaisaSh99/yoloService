@@ -63,18 +63,62 @@ jobs:
             if [ ! -f tests/test_image.jpg ]; then
               python -c "import cv2, numpy as np; cv2.imwrite('tests/test_image.jpg', np.zeros((100, 100, 3), dtype=np.uint8))"
             fi
+            
+            # Install AWS CLI if not present
+            if ! command -v aws &> /dev/null; then
+              echo "📦 Installing AWS CLI..."
+              curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+              unzip -q awscliv2.zip
+              sudo ./aws/install
+              rm -rf aws awscliv2.zip
+            fi
           EOF
 
-      - name: Run Tests on EC2
+      - name: Run SQLite Tests on EC2
         run: |
           ssh ec2 << 'EOF'
             cd '${{ env.REPO_NAME }}'
             source .venv/bin/activate
-            if [[ \"${GITHUB_REF_NAME}\" == \"main\" ]]; then
+            
+            # Test with SQLite storage
+            export STORAGE_TYPE=sqlite
+            if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
               export S3_BUCKET_NAME='maisa-polybot-images'
             else
               export S3_BUCKET_NAME='maisa-dev-bucket'
-              fi
-          echo \"🧪 S3_BUCKET_NAME=\$S3_BUCKET_NAME\"
+            fi
+            
+            echo "🧪 Testing with SQLite storage"
+            echo "📊 STORAGE_TYPE=$STORAGE_TYPE"
+            echo "🪣 S3_BUCKET_NAME=$S3_BUCKET_NAME"
+            
+            pytest tests/test_app.py --disable-warnings -v
+          EOF
+
+      - name: Run DynamoDB Tests on EC2
+        run: |
+          ssh ec2 << 'EOF'
+            cd '${{ env.REPO_NAME }}'
+            source .venv/bin/activate
+            
+            # Test with DynamoDB storage
+            export STORAGE_TYPE=dynamodb
+            export AWS_DEFAULT_REGION=eu-west-2
+            if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+              export S3_BUCKET_NAME='maisa-polybot-images'
+              export DYNAMODB_TABLE='YoloPredictions-Test-Prod'
+            else
+              export S3_BUCKET_NAME='maisa-dev-bucket'
+              export DYNAMODB_TABLE='YoloPredictions-Test-Dev'
+            fi
+            
+            echo "🧪 Testing with DynamoDB storage"
+            echo "📊 STORAGE_TYPE=$STORAGE_TYPE"
+            echo "🪣 S3_BUCKET_NAME=$S3_BUCKET_NAME"
+            echo "🗄️ DYNAMODB_TABLE=$DYNAMODB_TABLE"
+            
+            # Check AWS credentials
+            aws sts get-caller-identity || echo "⚠️ AWS credentials not configured - DynamoDB tests may fail"
+            
             pytest tests/test_app.py --disable-warnings -v
           EOF
