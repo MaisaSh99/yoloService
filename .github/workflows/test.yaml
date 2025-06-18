@@ -101,21 +101,22 @@ jobs:
             cd '${{ env.REPO_NAME }}'
             source .venv/bin/activate
             
-            # Test with DynamoDB storage
+            # Test with DynamoDB storage in us-east-2
             export STORAGE_TYPE=dynamodb
-            export AWS_DEFAULT_REGION=eu-west-2
+            export AWS_DEFAULT_REGION=us-east-2
             if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
               export S3_BUCKET_NAME='maisa-polybot-images'
-              export DYNAMODB_TABLE='YoloPredictions-Test-Prod'
+              export DYNAMODB_TABLE='maisa-YoloPredictions-Test-Prod'
             else
               export S3_BUCKET_NAME='maisa-dev-bucket'
-              export DYNAMODB_TABLE='YoloPredictions-Test-Dev'
+              export DYNAMODB_TABLE='maisa-YoloPredictions-Test-Dev'
             fi
             
-            echo "🧪 Testing with DynamoDB storage"
+            echo "🧪 Testing with DynamoDB storage in us-east-2"
             echo "📊 STORAGE_TYPE=$STORAGE_TYPE"
             echo "🪣 S3_BUCKET_NAME=$S3_BUCKET_NAME"
             echo "🗄️ DYNAMODB_TABLE=$DYNAMODB_TABLE"
+            echo "🌍 AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION"
             
             # Check AWS credentials
             aws sts get-caller-identity || echo "⚠️ AWS credentials not configured - DynamoDB tests may fail"
