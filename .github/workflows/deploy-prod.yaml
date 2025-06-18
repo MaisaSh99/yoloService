@@ -81,6 +81,49 @@ jobs:
           scp -i key.pem -o StrictHostKeyChecking=no .env ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/ubuntu/yoloService/.env
 
           ssh -i key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            echo "💾 CHECKING DISK SPACE AND CLEANING UP"
+            
+            # Show current disk usage
+            echo "Current disk usage:"
+            df -h /
+            
+            # Check if disk usage is above 80%
+            DISK_USAGE=$(df / | awk 'NR==2 {print $(NF-1)}' | sed 's/%//')
+            echo "Disk usage: ${DISK_USAGE}%"
+            
+            if [ "$DISK_USAGE" -gt 80 ]; then
+              echo "⚠️ Disk usage is high (${DISK_USAGE}%), performing cleanup..."
+              
+              # Docker cleanup
+              echo "🧹 Cleaning Docker system..."
+              docker system prune -af --volumes 2>/dev/null || echo "Docker cleanup completed"
+              
+              # Remove unused Docker images
+              echo "🗑️ Removing unused Docker images..."
+              docker image prune -af 2>/dev/null || echo "Image cleanup completed"
+              
+              # Clean package cache
+              echo "📦 Cleaning package cache..."
+              sudo apt-get clean 2>/dev/null || echo "APT cache cleaned"
+              sudo apt-get autoremove -y 2>/dev/null || echo "Autoremove completed"
+              
+              # Clean logs older than 7 days
+              echo "📝 Cleaning old logs..."
+              sudo find /var/log -name "*.log" -type f -mtime +7 -delete 2>/dev/null || echo "Log cleanup completed"
+              sudo journalctl --vacuum-time=7d 2>/dev/null || echo "Journal cleanup completed"
+              
+              # Clean temporary files
+              echo "🗂️ Cleaning temporary files..."
+              sudo rm -rf /tmp/* 2>/dev/null || echo "Temp cleanup completed"
+              sudo rm -rf /var/tmp/* 2>/dev/null || echo "Var temp cleanup completed"
+              
+              # Show disk usage after cleanup
+              echo "Disk usage after cleanup:"
+              df -h /
+            else
+              echo "✅ Disk usage is acceptable (${DISK_USAGE}%)"
+            fi
+            
             echo "📁 Cloning or updating repo"
             if [ -d "yoloService" ]; then
               cd yoloService
@@ -127,43 +170,50 @@ jobs:
               echo "✅ Docker already installed"
             fi
 
-            echo "🛑 FORCE STOPPING ALL CONFLICTING SERVICES"
+            echo "🛑 STOPPING CONFLICTING SERVICES AND CLEANING UP"
             
             # Stop all Docker containers first
             echo "Stopping all running Docker containers..."
             docker stop $(docker ps -q) 2>/dev/null || echo "No containers to stop"
+            
+            # Remove old containers and images to free space
+            echo "Removing old containers and images..."
+            docker container prune -f 2>/dev/null || echo "Container cleanup completed"
+            docker image prune -f 2>/dev/null || echo "Image cleanup completed"
             
             # Kill any processes using our ports
             echo "Killing any processes using ports 8080, 8889..."
             sudo fuser -k 8080/tcp 2>/dev/null || echo "Port 8080 is free"
             sudo fuser -k 8889/tcp 2>/dev/null || echo "Port 8889 is free"
             
-            # Remove any existing containers
-            echo "Removing old containers..."
-            docker rm -f yolo-dev yolo-prod otel-collector-yolo-dev otel-collector-yolo-prod 2>/dev/null || echo "No containers to remove"
+            # Remove any existing containers by name
+            echo "Removing specific containers..."
+            docker rm -f yolo-dev yolo-prod otel-collector-yolo-dev otel-collector-yolo-prod 2>/dev/null || echo "No specific containers to remove"
             
             # Clean up networks
             echo "Cleaning up Docker networks..."
             docker network prune -f 2>/dev/null || echo "No networks to clean"
             
-            # Wait a moment for ports to be released
-            echo "Waiting for ports to be released..."
-            sleep 5
+            # Final disk space check before deployment
+            echo "Final disk space before deployment:"
+            df -h /
             
-            echo "[+] Checking for Docker"
-            if ! command -v docker &> /dev/null; then
-              echo "📦 Installing Docker..."
-              curl -fsSL https://get.docker.com -o get-docker.sh
-              sh get-docker.sh
-              sudo usermod -aG docker $USER
-              newgrp docker
-            else
-              echo "✅ Docker already installed"
-            fi
+            # Wait a moment for cleanup to complete
+            echo "Waiting for cleanup to complete..."
+            sleep 5
 
             echo "🐳 Running Docker Compose for Prod (with clean start)"
             docker compose -f docker-compose.prod.yaml down --remove-orphans 2>/dev/null || echo "Nothing to bring down"
-            docker compose -f docker-compose.prod.yaml pull
+            
+            # Pull images with automatic cleanup if space runs out
+            echo "📥 Pulling latest images..."
+            if ! docker compose -f docker-compose.prod.yaml pull; then
+              echo "⚠️ Pull failed, performing additional cleanup..."
+              docker system prune -af --volumes
+              docker compose -f docker-compose.prod.yaml pull
+            fi
+            
+            echo "🚀 Starting services..."
             docker compose -f docker-compose.prod.yaml up -d --remove-orphans
 
             echo "⏱️ Waiting for services to start..."
@@ -175,6 +225,8 @@ jobs:
             else
               echo "⚠️ YOLO health check failed"
               docker logs yolo-prod 2>/dev/null || echo "No yolo-prod container found"
+              echo "Container status:"
+              docker ps -a | grep yolo
             fi
 
             echo "🔍 Verifying OpenTelemetry metrics endpoint"
@@ -195,4 +247,7 @@ jobs:
             
             echo "📊 Final container status:"
             docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            
+            echo "💾 Final disk usage:"
+            df -h /
           EOF
