@@ -101,15 +101,15 @@ jobs:
             cd '${{ env.REPO_NAME }}'
             source .venv/bin/activate
             
-            # Test with DynamoDB storage in us-east-2
+            # Test with DynamoDB storage using existing dev table
             export STORAGE_TYPE=dynamodb
             export AWS_DEFAULT_REGION=us-east-2
             if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
               export S3_BUCKET_NAME='maisa-polybot-images'
-              export DYNAMODB_TABLE='maisa-YoloPredictions-Test-Prod'
+              export DYNAMODB_TABLE='maisa-YoloPredictions-Dev'  # Use existing dev table for testing
             else
               export S3_BUCKET_NAME='maisa-dev-bucket'
-              export DYNAMODB_TABLE='maisa-YoloPredictions-Test-Dev'
+              export DYNAMODB_TABLE='maisa-YoloPredictions-Dev'  # Use existing dev table for testing
             fi
             
             echo "🧪 Testing with DynamoDB storage in us-east-2"
