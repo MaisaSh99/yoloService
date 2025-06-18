@@ -7,7 +7,7 @@ services:
       - "8080:8080"
     env_file: .env
     environment:
-      - STORAGE_TYPE=${STORAGE_TYPE:-sqlite}
+      - STORAGE_TYPE=${STORAGE_TYPE:-dynamodb}
       - DYNAMODB_TABLE=${DYNAMODB_TABLE:-maisa-YoloPredictions-Prod}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-2}
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
