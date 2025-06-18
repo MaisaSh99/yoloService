@@ -170,42 +170,68 @@ jobs:
               echo "✅ Docker already installed"
             fi
 
-            echo "🛑 STOPPING CONFLICTING SERVICES AND CLEANING UP"
+            echo "🔍 INVESTIGATING PORT 8889 CONFLICTS"
             
-            # Stop all Docker containers first
-            echo "Stopping all running Docker containers..."
-            docker stop $(docker ps -q) 2>/dev/null || echo "No containers to stop"
+            # Show what's using port 8889
+            echo "Processes using port 8889:"
+            sudo lsof -i :8889 || echo "No processes found using port 8889"
             
-            # Remove old containers and images to free space
-            echo "Removing old containers and images..."
-            docker container prune -f 2>/dev/null || echo "Container cleanup completed"
-            docker image prune -f 2>/dev/null || echo "Image cleanup completed"
+            # Show all listening ports
+            echo "All listening ports:"
+            sudo netstat -tlnp | grep -E ":(8080|8889)" || echo "No processes on ports 8080/8889"
             
-            # Kill any processes using our ports
-            echo "Killing any processes using ports 8080, 8889..."
-            sudo fuser -k 8080/tcp 2>/dev/null || echo "Port 8080 is free"
-            sudo fuser -k 8889/tcp 2>/dev/null || echo "Port 8889 is free"
-            
-            # Remove any existing containers by name
-            echo "Removing specific containers..."
-            docker rm -f yolo-dev yolo-prod otel-collector-yolo-dev otel-collector-yolo-prod 2>/dev/null || echo "No specific containers to remove"
-            
-            # Clean up networks
-            echo "Cleaning up Docker networks..."
-            docker network prune -f 2>/dev/null || echo "No networks to clean"
-            
-            # Final disk space check before deployment
-            echo "Final disk space before deployment:"
-            df -h /
-            
-            # Wait a moment for cleanup to complete
-            echo "Waiting for cleanup to complete..."
-            sleep 5
+            # Show Docker containers and their ports
+            echo "Current Docker containers:"
+            docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-            echo "🐳 Running Docker Compose for Dev (with clean start)"
-            docker compose -f docker-compose.dev.yaml down --remove-orphans 2>/dev/null || echo "Nothing to bring down"
+            echo "🛑 AGGRESSIVE PORT AND SERVICE CLEANUP"
             
-            # Pull images with automatic cleanup if space runs out
+            # Stop all Docker containers
+            echo "Stopping ALL Docker containers..."
+            docker stop $(docker ps -aq) 2>/dev/null || echo "No containers to stop"
+            
+            # Remove all Docker containers
+            echo "Removing ALL Docker containers..."
+            docker rm -f $(docker ps -aq) 2>/dev/null || echo "No containers to remove"
+            
+            # Kill ALL processes on target ports (more aggressive)
+            echo "Forcefully killing ALL processes on ports 8080 and 8889..."
+            sudo pkill -f ":8080" 2>/dev/null || echo "No processes killed on port 8080"
+            sudo pkill -f ":8889" 2>/dev/null || echo "No processes killed on port 8889"
+            sudo fuser -k 8080/tcp 2>/dev/null || echo "Port 8080 force-freed"
+            sudo fuser -k 8889/tcp 2>/dev/null || echo "Port 8889 force-freed"
+            
+            # Additional aggressive port cleanup
+            echo "Additional port cleanup methods..."
+            sudo kill $(sudo lsof -t -i:8080) 2>/dev/null || echo "No additional processes on 8080"
+            sudo kill $(sudo lsof -t -i:8889) 2>/dev/null || echo "No additional processes on 8889"
+            
+            # Clean up Docker networks completely
+            echo "Removing ALL Docker networks..."
+            docker network rm $(docker network ls -q) 2>/dev/null || echo "No networks to remove"
+            
+            # Docker system reset
+            echo "Complete Docker system cleanup..."
+            docker system prune -af --volumes 2>/dev/null || echo "Docker system cleaned"
+            
+            # Wait for system to settle
+            echo "Waiting for system to settle after aggressive cleanup..."
+            sleep 10
+            
+            # Verify ports are free
+            echo "Verifying ports are free:"
+            sudo lsof -i :8080 || echo "✅ Port 8080 is free"
+            sudo lsof -i :8889 || echo "✅ Port 8889 is free"
+
+            echo "🐳 Running Docker Compose for Dev (with complete reset)"
+            
+            # Ensure we're in the right directory
+            cd /home/ubuntu/yoloService
+            
+            # Complete reset and restart
+            docker compose -f docker-compose.dev.yaml down --remove-orphans --volumes 2>/dev/null || echo "Nothing to bring down"
+            
+            # Pull images
             echo "📥 Pulling latest images..."
             if ! docker compose -f docker-compose.dev.yaml pull; then
               echo "⚠️ Pull failed, performing additional cleanup..."
@@ -213,8 +239,9 @@ jobs:
               docker compose -f docker-compose.dev.yaml pull
             fi
             
-            echo "🚀 Starting services..."
-            docker compose -f docker-compose.dev.yaml up -d --remove-orphans
+            # Start services with force recreate
+            echo "🚀 Starting services with force recreate..."
+            docker compose -f docker-compose.dev.yaml up -d --force-recreate --remove-orphans
 
             echo "⏱️ Waiting for services to start..."
             sleep 30
@@ -235,6 +262,8 @@ jobs:
             else
               echo "⚠️ Metrics not available"
               docker logs otel-collector-yolo-dev 2>/dev/null || echo "No otelcol container found"
+              echo "Checking what's on port 8889:"
+              sudo lsof -i :8889 || echo "Nothing found on port 8889"
             fi
             
             echo "🗄️ Testing DynamoDB connectivity"
@@ -247,6 +276,10 @@ jobs:
             
             echo "📊 Final container status:"
             docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            
+            echo "🔍 Final port investigation:"
+            sudo lsof -i :8080 || echo "Port 8080 free"
+            sudo lsof -i :8889 || echo "Port 8889 free"
             
             echo "💾 Final disk usage:"
             df -h /
