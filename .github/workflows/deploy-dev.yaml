@@ -127,7 +127,21 @@ jobs:
               echo "✅ Docker already installed"
             fi
 
+            echo "🛑 Stopping any conflicting services automatically"
+            # Stop production containers that might conflict with dev ports
+            docker stop yolo-prod otel-collector-yolo-prod 2>/dev/null || echo "No production containers to stop"
+            
+            # Clean up any containers using our ports
+            echo "🧹 Cleaning up port conflicts"
+            docker ps --format "table {{.Names}}\t{{.Ports}}" | grep ":8080\|:8889" | awk '{print $1}' | grep -v "NAMES" | while read container; do
+              if [ "$container" != "yolo-dev" ] && [ "$container" != "otel-collector-yolo-dev" ]; then
+                echo "Stopping conflicting container: $container"
+                docker stop "$container" 2>/dev/null || true
+              fi
+            done
+
             echo "🐳 Running Docker Compose for Dev"
+            docker compose -f docker-compose.dev.yaml down --remove-orphans
             docker compose -f docker-compose.dev.yaml pull
             docker compose -f docker-compose.dev.yaml up -d --remove-orphans
 
