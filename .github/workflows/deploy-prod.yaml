@@ -127,21 +127,42 @@ jobs:
               echo "✅ Docker already installed"
             fi
 
-            echo "🛑 Stopping any conflicting services automatically"
-            # Stop development containers that might conflict with prod ports
-            docker stop yolo-dev otel-collector-yolo-dev 2>/dev/null || echo "No development containers to stop"
+            echo "🛑 FORCE STOPPING ALL CONFLICTING SERVICES"
             
-            # Clean up any containers using our ports
-            echo "🧹 Cleaning up port conflicts"
-            docker ps --format "table {{.Names}}\t{{.Ports}}" | grep ":8080\|:8889" | awk '{print $1}' | grep -v "NAMES" | while read container; do
-              if [ "$container" != "yolo-prod" ] && [ "$container" != "otel-collector-yolo-prod" ]; then
-                echo "Stopping conflicting container: $container"
-                docker stop "$container" 2>/dev/null || true
-              fi
-            done
+            # Stop all Docker containers first
+            echo "Stopping all running Docker containers..."
+            docker stop $(docker ps -q) 2>/dev/null || echo "No containers to stop"
+            
+            # Kill any processes using our ports
+            echo "Killing any processes using ports 8080, 8889..."
+            sudo fuser -k 8080/tcp 2>/dev/null || echo "Port 8080 is free"
+            sudo fuser -k 8889/tcp 2>/dev/null || echo "Port 8889 is free"
+            
+            # Remove any existing containers
+            echo "Removing old containers..."
+            docker rm -f yolo-dev yolo-prod otel-collector-yolo-dev otel-collector-yolo-prod 2>/dev/null || echo "No containers to remove"
+            
+            # Clean up networks
+            echo "Cleaning up Docker networks..."
+            docker network prune -f 2>/dev/null || echo "No networks to clean"
+            
+            # Wait a moment for ports to be released
+            echo "Waiting for ports to be released..."
+            sleep 5
+            
+            echo "[+] Checking for Docker"
+            if ! command -v docker &> /dev/null; then
+              echo "📦 Installing Docker..."
+              curl -fsSL https://get.docker.com -o get-docker.sh
+              sh get-docker.sh
+              sudo usermod -aG docker $USER
+              newgrp docker
+            else
+              echo "✅ Docker already installed"
+            fi
 
-            echo "🐳 Running Docker Compose for Prod"
-            docker compose -f docker-compose.prod.yaml down --remove-orphans
+            echo "🐳 Running Docker Compose for Prod (with clean start)"
+            docker compose -f docker-compose.prod.yaml down --remove-orphans 2>/dev/null || echo "Nothing to bring down"
             docker compose -f docker-compose.prod.yaml pull
             docker compose -f docker-compose.prod.yaml up -d --remove-orphans
 
@@ -171,4 +192,7 @@ jobs:
               echo "⚠️ DynamoDB storage test failed - check logs"
               docker logs yolo-prod --tail 20 2>/dev/null || echo "No logs available"
             fi
+            
+            echo "📊 Final container status:"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
           EOF
