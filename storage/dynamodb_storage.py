@@ -11,9 +11,10 @@ from datetime import datetime
 class DynamoDBStorage(BaseStorage):
     def __init__(self, table_name: str = None):
         if table_name is None:
-            table_name = os.getenv("DYNAMODB_TABLE", "PredictionsDev-merry")
+            table_name = os.getenv("DYNAMODB_TABLE", "maisa-YoloPredictions-Dev")
 
-        self.dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
+        # Use US East 2 (Ohio) region
+        self.dynamodb = boto3.resource("dynamodb", region_name="us-east-2")
         self.table_name = table_name
         self.table = self.dynamodb.Table(table_name)
 
@@ -25,9 +26,9 @@ class DynamoDBStorage(BaseStorage):
         try:
             # Check if table exists
             self.table.load()
-            print(f"✅ DynamoDB table '{self.table_name}' already exists")
+            print(f"✅ DynamoDB table '{self.table_name}' already exists in us-east-2")
         except self.dynamodb.meta.client.exceptions.ResourceNotFoundException:
-            print(f"📦 Creating DynamoDB table '{self.table_name}'...")
+            print(f"📦 Creating DynamoDB table '{self.table_name}' in us-east-2...")
             self._create_table()
 
     def _create_table(self):
@@ -78,7 +79,7 @@ class DynamoDBStorage(BaseStorage):
             # Wait for table to be created
             table.wait_until_exists()
             self.table = table
-            print(f"✅ DynamoDB table '{self.table_name}' created successfully")
+            print(f"✅ DynamoDB table '{self.table_name}' created successfully in us-east-2")
 
         except Exception as e:
             print(f"❌ Failed to create DynamoDB table: {e}")
@@ -97,7 +98,7 @@ class DynamoDBStorage(BaseStorage):
             "predicted_image": predicted_image
         }
 
-        print(f"✅ Saving prediction metadata: {item}")
+        print(f"✅ Saving prediction metadata to {self.table_name}: {item}")
         try:
             self.table.put_item(Item=item)
         except Exception as e:
@@ -117,7 +118,7 @@ class DynamoDBStorage(BaseStorage):
             "box": [Decimal(str(x)) for x in box]
         }
 
-        print(f"✅ Saving detection item: {item}")
+        print(f"✅ Saving detection to {self.table_name}: {item}")
         try:
             self.table.put_item(Item=item)
         except Exception as e:

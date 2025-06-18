@@ -70,8 +70,8 @@ jobs:
           echo "IMG_NAME=$IMAGE_NAME" > .env
           echo "S3_BUCKET_NAME=${{ secrets.S3_BUCKET_NAME_DEV }}" >> .env
           echo "STORAGE_TYPE=dynamodb" >> .env
-          echo "DYNAMODB_TABLE=${{ secrets.DYNAMODB_TABLE_DEV || 'YoloPredictions-Dev' }}" >> .env
-          echo "AWS_DEFAULT_REGION=eu-west-2" >> .env
+          echo "DYNAMODB_TABLE=${{ secrets.DYNAMODB_TABLE_DEV || 'maisa-YoloPredictions-Dev' }}" >> .env
+          echo "AWS_DEFAULT_REGION=us-east-2" >> .env
           
           echo "📝 Contents of .env file:"
           cat .env
@@ -151,13 +151,13 @@ jobs:
             echo "🔍 Checking AWS configuration"
             aws sts get-caller-identity || echo "⚠️ AWS credentials not configured properly"
             
-            echo "🗄️ Checking DynamoDB table status"
+            echo "🗄️ Checking DynamoDB table status in us-east-2"
             DYNAMODB_TABLE=$(grep DYNAMODB_TABLE .env | cut -d'=' -f2)
-            echo "Checking table: $DYNAMODB_TABLE"
+            echo "Checking table: $DYNAMODB_TABLE in us-east-2"
             
-            # Test DynamoDB access
-            aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region eu-west-2 2>/dev/null || \
-              echo "⚠️ DynamoDB table $DYNAMODB_TABLE not accessible (will be created automatically)"
+            # Test DynamoDB access in us-east-2
+            aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region us-east-2 2>/dev/null || \
+              echo "⚠️ DynamoDB table $DYNAMODB_TABLE not accessible in us-east-2 (will be created automatically)"
                     
             echo "[+] Checking for Docker"
             if ! command -v docker &> /dev/null; then
@@ -289,9 +289,10 @@ jobs:
               sudo lsof -i :8889 || echo "Nothing found on port 8889"
             fi
             
-            echo "🗄️ Testing DynamoDB connectivity"
+            echo "🗄️ Testing DynamoDB connectivity in us-east-2"
             if curl -s -X POST -F "file=@tests/test_image.jpg" http://localhost:8080/predict 2>/dev/null; then
-              echo "✅ DynamoDB storage test passed"
+              echo "✅ DynamoDB storage test passed in us-east-2"
+              echo "Table: $DYNAMODB_TABLE"
             else
               echo "⚠️ DynamoDB storage test failed - check logs"
               docker logs yolo-dev --tail 20 2>/dev/null || echo "No logs available"
