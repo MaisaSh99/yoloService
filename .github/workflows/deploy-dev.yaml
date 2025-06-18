@@ -184,7 +184,24 @@ jobs:
             echo "Current Docker containers:"
             docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-            echo "🛑 AGGRESSIVE PORT AND SERVICE CLEANUP"
+            echo "🛑 TARGETED OPENTELEMETRY COLLECTOR CLEANUP"
+            
+            # Stop OpenTelemetry systemd service if it exists
+            echo "Stopping OpenTelemetry systemd service..."
+            sudo systemctl stop otelcol 2>/dev/null || echo "No otelcol systemd service found"
+            sudo systemctl disable otelcol 2>/dev/null || echo "No otelcol systemd service to disable"
+            
+            # Kill any standalone otelcol processes
+            echo "Killing standalone OpenTelemetry processes..."
+            sudo pkill -f otelcol 2>/dev/null || echo "No otelcol processes found"
+            sudo pkill -f opentelemetry-collector 2>/dev/null || echo "No opentelemetry-collector processes found"
+            
+            # Kill specific PIDs that we found using port 8889
+            echo "Killing specific processes using port 8889..."
+            sudo kill -9 $(sudo lsof -t -i:8889) 2>/dev/null || echo "No processes to kill on port 8889"
+            
+            # General Docker and port cleanup
+            echo "🛑 GENERAL DOCKER AND PORT CLEANUP"
             
             # Stop all Docker containers
             echo "Stopping ALL Docker containers..."
@@ -203,8 +220,8 @@ jobs:
             
             # Additional aggressive port cleanup
             echo "Additional port cleanup methods..."
-            sudo kill $(sudo lsof -t -i:8080) 2>/dev/null || echo "No additional processes on 8080"
-            sudo kill $(sudo lsof -t -i:8889) 2>/dev/null || echo "No additional processes on 8889"
+            sudo kill -9 $(sudo lsof -t -i:8080) 2>/dev/null || echo "No additional processes on 8080"
+            sudo kill -9 $(sudo lsof -t -i:8889) 2>/dev/null || echo "No additional processes on 8889"
             
             # Clean up Docker networks completely
             echo "Removing ALL Docker networks..."
@@ -218,10 +235,16 @@ jobs:
             echo "Waiting for system to settle after aggressive cleanup..."
             sleep 10
             
-            # Verify ports are free
-            echo "Verifying ports are free:"
+            # Final verification that ports are free
+            echo "🔍 FINAL PORT VERIFICATION:"
+            echo "Port 8080 status:"
             sudo lsof -i :8080 || echo "✅ Port 8080 is free"
+            echo "Port 8889 status:"
             sudo lsof -i :8889 || echo "✅ Port 8889 is free"
+            
+            # Check for any remaining otelcol processes
+            echo "Checking for any remaining otelcol processes:"
+            ps aux | grep otelcol | grep -v grep || echo "✅ No otelcol processes running"
 
             echo "🐳 Running Docker Compose for Dev (with complete reset)"
             
@@ -262,7 +285,7 @@ jobs:
             else
               echo "⚠️ Metrics not available"
               docker logs otel-collector-yolo-dev 2>/dev/null || echo "No otelcol container found"
-              echo "Checking what's on port 8889:"
+              echo "Checking what's on port 8889 after deployment:"
               sudo lsof -i :8889 || echo "Nothing found on port 8889"
             fi
             
