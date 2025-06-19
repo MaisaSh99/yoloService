@@ -11,6 +11,7 @@ services:
       - DYNAMODB_TABLE=${DYNAMODB_TABLE:-maisa-YoloPredictions-Prod}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-2}
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - ENVIRONMENT=prod
     networks:
       - observability
     healthcheck:
