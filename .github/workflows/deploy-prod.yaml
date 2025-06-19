@@ -72,6 +72,7 @@ jobs:
           echo "STORAGE_TYPE=dynamodb" >> .env
           echo "DYNAMODB_TABLE=${{ secrets.DYNAMODB_TABLE_PROD || 'maisa-YoloPredictions-Prod' }}" >> .env
           echo "AWS_DEFAULT_REGION=us-east-2" >> .env
+          echo "ENVIRONMENT=prod" >> .env
           
           echo "📝 Contents of .env file:"
           cat .env
@@ -158,6 +159,11 @@ jobs:
             # Test DynamoDB access in us-east-2
             aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region us-east-2 2>/dev/null || \
               echo "⚠️ DynamoDB table $DYNAMODB_TABLE not accessible in us-east-2 (will be created automatically)"
+
+            echo "🔍 Checking SQS queue access"
+            aws sqs get-queue-url --queue-name "maisa-polybot-chat-messages" --region us-east-2 2>/dev/null && \
+              echo "✅ SQS queue 'maisa-polybot-chat-messages' is accessible" || \
+              echo "⚠️ SQS queue 'maisa-polybot-chat-messages' not accessible"
                     
             echo "[+] Checking for Docker"
             if ! command -v docker &> /dev/null; then
@@ -297,6 +303,9 @@ jobs:
               echo "⚠️ DynamoDB storage test failed - check logs"
               docker logs yolo-prod --tail 20 2>/dev/null || echo "No logs available"
             fi
+
+            echo "🔍 Testing SQS Consumer"
+            docker logs yolo-prod --tail 50 | grep -i "sqs\|queue" || echo "No SQS logs found"
             
             echo "📊 Final container status:"
             docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
