@@ -178,8 +178,8 @@ class SQSConsumer:
                     result_data = {
                         'chat_id': chat_id,
                         'prediction_id': prediction_id,
-                        'status': 'success'
-                        # No labels - Polybot will fetch them
+                        'status': 'success',
+                        'labels': detected_labels
                     }
                     self.send_result_to_polybot(callback_url, result_data)
 
