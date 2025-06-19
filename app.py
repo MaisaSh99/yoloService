@@ -231,7 +231,7 @@ class SQSConsumer:
                     MaxNumberOfMessages=1,
                     WaitTimeSeconds=20,  # Long polling
                     MessageAttributeNames=['All'],
-                    VisibilityTimeoutSeconds=300  # 5 minutes to process
+                    VisibilityTimeout=300  # ✅ FIXED: Changed from VisibilityTimeoutSeconds
                 )
 
                 messages = response.get('Messages', [])
